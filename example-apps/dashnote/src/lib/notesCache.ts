@@ -4,6 +4,7 @@
 // switching identities never mixes data. Invalidated when the contract or
 // network changes.
 import type { NoteRecord } from "../dash/queries";
+import { notesForCache } from "./encryptedNotes";
 
 const STORAGE_PREFIX = "dashnote.notes.";
 const SCHEMA_VERSION = 1;
@@ -82,7 +83,7 @@ export function saveCachedNotes(
     contractId,
     network,
     cachedAt: Date.now(),
-    notes,
+    notes: notesForCache(notes),
   };
   try {
     localStorage.setItem(

@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -13,6 +14,12 @@ import { getNote, listMyNotes, type NoteRecord } from "../dash/queries";
 import { updateNote } from "../dash/updateNote";
 import { DeleteNoteModal } from "./DeleteNoteModal";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import {
+  encryptedNotePayloadByteLength,
+  encryptNotePayload,
+  redactEncryptedNote,
+  unlockEncryptedNote,
+} from "../lib/encryptedNotes";
 import { byteLength, FIELD_BYTE_LIMIT } from "../lib/fieldLimits";
 import { errorMessage, normalizeLogOptions, type Logger } from "../lib/logger";
 import {
@@ -29,6 +36,12 @@ import { NoteList } from "./NoteList";
 const NETWORK = "testnet" as const;
 const STALE_EDIT_WARNING =
   "This note changed on the network. Your unsaved edits are still here — saving will overwrite the newer version.";
+const WRONG_PASSPHRASE_NOTE_ERROR =
+  "Unable to decrypt this note with the provided passphrase.";
+const WRONG_PASSPHRASE_NOTES_ERROR =
+  "Unable to decrypt encrypted notes with the provided passphrase.";
+const PARTIAL_PASSPHRASE_ERROR =
+  "Some encrypted notes use a different passphrase and remain locked.";
 
 type SelectedNoteId = string | "new" | null;
 
@@ -53,10 +66,11 @@ export function NotesWorkspace({
   const { status, sdk, keyManager, contractId, identityId, log } = session;
   const isDesktop = useMediaQuery("(min-width: 768px)");
 
-  const initialCachedNotes =
+  const initialCachedRawNotes =
     identityId && contractId
       ? (loadCachedNotes(identityId, contractId, NETWORK) ?? [])
       : [];
+  const initialCachedNotes = initialCachedRawNotes.map(redactEncryptedNote);
   // Seed the editor from the first cached note on desktop so the right pane
   // paints with content on frame 1 instead of "No note selected" flashing
   // through before the hydrate effect picks one.
@@ -87,8 +101,13 @@ export function NotesWorkspace({
   const [revalidating, setRevalidating] = useState(false);
   const [editsReady, setEditsReady] = useState(false);
   const [conflictWarning, setConflictWarning] = useState<string | null>(null);
+  const [encryptionUnlocked, setEncryptionUnlocked] = useState(false);
+  const [encryptionError, setEncryptionError] = useState<string | null>(null);
   const lastRevalidatedAt = useRef(0);
   const inFlightWriteRef = useRef(false);
+  const encryptionPassphraseRef = useRef<string | null>(null);
+  const encryptionStateVersionRef = useRef(0);
+  const rawNotesRef = useRef<NoteRecord[]>(initialCachedRawNotes);
   // Monotonic token so a late listMyNotes() response from a previous
   // identity/contract/session can't clobber state for the current one.
   const reloadTokenRef = useRef(0);
@@ -101,6 +120,9 @@ export function NotesWorkspace({
   const baselineMessageRef = useRef("");
   const selectedIdRef = useRef<SelectedNoteId>(null);
   const notesRef = useRef<NoteRecord[]>([]);
+  const sessionScopeRef = useRef(
+    `${identityId ?? ""}:${contractId ?? ""}:${status}`,
+  );
   useEffect(() => {
     notesRef.current = notes;
   }, [notes]);
@@ -120,6 +142,262 @@ export function NotesWorkspace({
     selectedIdRef.current = selectedId;
   }, [selectedId]);
 
+  const decorateRawNotes = useCallback(
+    async (
+      rawNotes: NoteRecord[],
+      passphrase: string | null,
+      reuseDecoratedNotes = true,
+    ) => {
+      if (!passphrase) return rawNotes.map(redactEncryptedNote);
+      const previousById = reuseDecoratedNotes
+        ? new Map(notesRef.current.map((note) => [note.id, note]))
+        : new Map<string, NoteRecord>();
+      return Promise.all(
+        rawNotes.map((note) => {
+          const previous = previousById.get(note.id);
+          if (
+            previous?.encrypted &&
+            !previous.locked &&
+            !previous.decryptError &&
+            previous.revision === note.revision &&
+            previous.rawTitle === note.title &&
+            previous.rawMessage === note.message
+          ) {
+            return previous;
+          }
+          return unlockEncryptedNote(note, passphrase);
+        }),
+      );
+    },
+    [],
+  );
+
+  const syncSelectedNoteFields = useCallback(
+    (
+      note: NoteRecord,
+      staleWarning: string | null = null,
+      forceEncryptedFields = false,
+    ) => {
+      const nextTitle = note.title ?? "";
+      const nextMessage = note.message ?? "";
+      const wasDirty =
+        titleRef.current !== baselineTitleRef.current ||
+        messageRef.current !== baselineMessageRef.current;
+      const shouldForceFields = Boolean(
+        note.encrypted &&
+        (forceEncryptedFields || note.locked || note.decryptError),
+      );
+      setSelectedNote(note);
+      setBaselineTitle(nextTitle);
+      setBaselineMessage(nextMessage);
+      baselineTitleRef.current = nextTitle;
+      baselineMessageRef.current = nextMessage;
+      if (!wasDirty || shouldForceFields) {
+        setTitle(nextTitle);
+        setMessage(nextMessage);
+        titleRef.current = nextTitle;
+        messageRef.current = nextMessage;
+        setConflictWarning(null);
+      } else if (staleWarning) {
+        setConflictWarning(staleWarning);
+      }
+    },
+    [],
+  );
+
+  const clearSelectedDraft = useCallback(() => {
+    if (selectedIdRef.current !== "new") return;
+    selectedIdRef.current = null;
+    setSelectedId(null);
+    setSelectedNote(null);
+    setTitle("");
+    setMessage("");
+    setBaselineTitle("");
+    setBaselineMessage("");
+    baselineTitleRef.current = "";
+    baselineMessageRef.current = "";
+    titleRef.current = "";
+    messageRef.current = "";
+    setConflictWarning(null);
+  }, []);
+
+  const summarizeEncryptionResults = useCallback((decorated: NoteRecord[]) => {
+    const encryptedCount = decorated.filter((note) => note.encrypted).length;
+    const failedCount = decorated.filter((note) => note.decryptError).length;
+    const decryptedCount = decorated.filter(
+      (note) => note.encrypted && !note.locked && !note.decryptError,
+    ).length;
+    const decryptMessage =
+      decorated.find((note) => note.decryptErrorMessage)?.decryptErrorMessage ??
+      WRONG_PASSPHRASE_NOTES_ERROR;
+
+    return {
+      encryptedCount,
+      failedCount,
+      decryptedCount,
+      allFailed: encryptedCount > 0 && failedCount > 0 && decryptedCount === 0,
+      partialFailure: failedCount > 0 && decryptedCount > 0,
+      message:
+        decryptMessage === WRONG_PASSPHRASE_NOTE_ERROR
+          ? WRONG_PASSPHRASE_NOTES_ERROR
+          : decryptMessage,
+    };
+  }, []);
+
+  const commitDecoratedNotes = useCallback(
+    (
+      decorated: NoteRecord[],
+      reconcileSelected = false,
+      forceSelectedFields = false,
+    ) => {
+      setNotes(decorated);
+      notesRef.current = decorated;
+      if (reconcileSelected) {
+        const sel = selectedIdRef.current;
+        if (typeof sel === "string" && sel !== "new") {
+          const selected = decorated.find((note) => note.id === sel) ?? null;
+          if (selected) {
+            syncSelectedNoteFields(selected, null, forceSelectedFields);
+          } else {
+            setSelectedNote(null);
+          }
+        }
+      }
+      return decorated;
+    },
+    [syncSelectedNoteFields],
+  );
+
+  const reconcileEncryptionStatus = useCallback(
+    (decorated: NoteRecord[]) => {
+      if (!encryptionPassphraseRef.current) return true;
+      const summary = summarizeEncryptionResults(decorated);
+      if (summary.allFailed) {
+        encryptionStateVersionRef.current += 1;
+        encryptionPassphraseRef.current = null;
+        setEncryptionUnlocked(false);
+        setEncryptionError(summary.message);
+        clearSelectedDraft();
+        commitDecoratedNotes(
+          rawNotesRef.current.map(redactEncryptedNote),
+          true,
+          true,
+        );
+        return false;
+      }
+      if (summary.encryptedCount > 0) {
+        setEncryptionUnlocked(true);
+        setEncryptionError(
+          summary.partialFailure ? PARTIAL_PASSPHRASE_ERROR : null,
+        );
+      }
+      return true;
+    },
+    [clearSelectedDraft, commitDecoratedNotes, summarizeEncryptionResults],
+  );
+
+  const applyRawNotes = useCallback(
+    async (
+      rawNotes: NoteRecord[],
+      reconcileSelected = false,
+      forceSelectedFields = false,
+      passphrase: string | null = encryptionPassphraseRef.current,
+      reuseDecoratedNotes = true,
+    ) => {
+      const encryptionStateVersion = encryptionStateVersionRef.current;
+      const decorated = await decorateRawNotes(
+        rawNotes,
+        passphrase,
+        reuseDecoratedNotes,
+      );
+      if (encryptionStateVersion !== encryptionStateVersionRef.current) {
+        return null;
+      }
+      return commitDecoratedNotes(
+        decorated,
+        reconcileSelected,
+        forceSelectedFields,
+      );
+    },
+    [commitDecoratedNotes, decorateRawNotes],
+  );
+
+  async function handleUnlockEncryptedNotes(passphrase: string) {
+    const trimmed = passphrase.trim();
+    if (!trimmed) {
+      setEncryptionError("Enter a passphrase to unlock encrypted notes.");
+      return;
+    }
+    if (!globalThis.crypto?.subtle) {
+      setEncryptionError(
+        "Web Crypto is required to encrypt notes in this browser.",
+      );
+      setEncryptionUnlocked(false);
+      encryptionPassphraseRef.current = null;
+      return;
+    }
+    encryptionStateVersionRef.current += 1;
+    setEncryptionError(null);
+    const encryptionStateVersion = encryptionStateVersionRef.current;
+    const decorated = await decorateRawNotes(
+      rawNotesRef.current,
+      trimmed,
+      false,
+    );
+    if (encryptionStateVersion !== encryptionStateVersionRef.current) return;
+    const summary = summarizeEncryptionResults(decorated);
+    if (summary.allFailed) {
+      encryptionPassphraseRef.current = null;
+      setEncryptionUnlocked(false);
+      setEncryptionError(summary.message);
+      clearSelectedDraft();
+      await applyRawNotes(rawNotesRef.current, true, true, null);
+      return;
+    }
+    encryptionPassphraseRef.current = trimmed;
+    setEncryptionUnlocked(true);
+    commitDecoratedNotes(decorated, true);
+    setEncryptionError(
+      summary.partialFailure ? PARTIAL_PASSPHRASE_ERROR : null,
+    );
+  }
+
+  function handleLockEncryptedNotes() {
+    encryptionStateVersionRef.current += 1;
+    encryptionPassphraseRef.current = null;
+    setEncryptionUnlocked(false);
+    setEncryptionError(null);
+    clearSelectedDraft();
+    void applyRawNotes(rawNotesRef.current, true, true);
+  }
+
+  useLayoutEffect(() => {
+    const sessionScope = `${identityId ?? ""}:${contractId ?? ""}:${status}`;
+    if (sessionScopeRef.current === sessionScope) return;
+    sessionScopeRef.current = sessionScope;
+    encryptionStateVersionRef.current += 1;
+    encryptionPassphraseRef.current = null;
+    rawNotesRef.current = [];
+    notesRef.current = [];
+    selectedIdRef.current = null;
+    titleRef.current = "";
+    messageRef.current = "";
+    baselineTitleRef.current = "";
+    baselineMessageRef.current = "";
+    setEncryptionUnlocked(false);
+    setEncryptionError(null);
+    setNotes([]);
+    setSelectedNote(null);
+    setSelectedId(null);
+    setTitle("");
+    setMessage("");
+    setBaselineTitle("");
+    setBaselineMessage("");
+    setConflictWarning(null);
+    setError(null);
+    setEditsReady(false);
+  }, [identityId, contractId, status]);
+
   const isAuthed = status === "authenticated";
   const isBrowsing = status === "browsing";
   const canRead = isAuthed || isBrowsing;
@@ -127,8 +405,15 @@ export function NotesWorkspace({
   const canMutate = Boolean(
     isAuthed && sdk && keyManager && contractId && editsReady,
   );
+  const selectedEncryptedLocked = Boolean(
+    selectedNote?.encrypted &&
+    (selectedNote.locked || selectedNote.decryptError),
+  );
   const dirty = title !== baselineTitle || message !== baselineMessage;
-  const messageBytes = byteLength(message);
+  const encryptionActive = Boolean(encryptionUnlocked);
+  const messageBytes = encryptionActive
+    ? encryptedNotePayloadByteLength({ title, message })
+    : byteLength(message);
   const messageOversize = messageBytes > FIELD_BYTE_LIMIT;
 
   const hasMeaningfulContent = useMemo(
@@ -153,6 +438,7 @@ export function NotesWorkspace({
         !identityId ||
         (status !== "authenticated" && status !== "browsing");
       if (sessionTornDown) {
+        rawNotesRef.current = [];
         setNotes([]);
         setSelectedNote(null);
         setSelectedId(null);
@@ -180,25 +466,36 @@ export function NotesWorkspace({
       const startedIdentityId = identityId;
       const startedContractId = contractId;
       try {
-        const nextNotes = await listMyNotes({
+        const rawNextNotes = await listMyNotes({
           sdk,
           contractId,
           ownerId: identityId,
           log,
         });
+        const encryptionStateVersion = encryptionStateVersionRef.current;
+        const nextNotes = await decorateRawNotes(
+          rawNextNotes,
+          encryptionPassphraseRef.current,
+        );
         // Bail if a newer reload started, or session keys changed under us.
         if (
           reloadTokenRef.current !== myToken ||
           startedIdentityId !== identityId ||
-          startedContractId !== contractId
+          startedContractId !== contractId ||
+          encryptionStateVersion !== encryptionStateVersionRef.current
         ) {
           return;
         }
         lastRevalidatedAt.current = Date.now();
+        rawNotesRef.current = rawNextNotes;
+        if (!reconcileEncryptionStatus(nextNotes)) {
+          setEditsReady(true);
+          return;
+        }
         const changed = !notesEqualByRevision(prevNotes, nextNotes);
         if (changed) {
           setNotes(nextNotes);
-          saveCachedNotes(identityId, contractId, NETWORK, nextNotes);
+          saveCachedNotes(identityId, contractId, NETWORK, rawNextNotes);
           // Reconcile the currently selected note. The list query already
           // returned full bodies, so we don't need an extra getNote.
           const sel = selectedIdRef.current;
@@ -206,21 +503,7 @@ export function NotesWorkspace({
             const before = prevNotes.find((n) => n.id === sel) ?? null;
             const after = nextNotes.find((n) => n.id === sel) ?? null;
             if (after && (!before || before.revision !== after.revision)) {
-              const nextTitle = after.title ?? "";
-              const nextMessage = after.message ?? "";
-              const wasDirty =
-                titleRef.current !== baselineTitleRef.current ||
-                messageRef.current !== baselineMessageRef.current;
-              setSelectedNote(after);
-              setBaselineTitle(nextTitle);
-              setBaselineMessage(nextMessage);
-              if (!wasDirty) {
-                setTitle(nextTitle);
-                setMessage(nextMessage);
-                setConflictWarning(null);
-              } else {
-                setConflictWarning(STALE_EDIT_WARNING);
-              }
+              syncSelectedNoteFields(after, STALE_EDIT_WARNING);
             } else if (after && !inFlightWriteRef.current) {
               setSelectedNote(after);
             }
@@ -256,7 +539,17 @@ export function NotesWorkspace({
         }
       }
     },
-    [contractId, identityId, log, sdk, status, isDesktop],
+    [
+      contractId,
+      decorateRawNotes,
+      identityId,
+      log,
+      reconcileEncryptionStatus,
+      sdk,
+      status,
+      isDesktop,
+      syncSelectedNoteFields,
+    ],
   );
 
   // Hydrate from cache synchronously when identity/contract changes, then kick
@@ -268,6 +561,7 @@ export function NotesWorkspace({
       !contractId ||
       (status !== "authenticated" && status !== "browsing")
     ) {
+      rawNotesRef.current = [];
       setNotes([]);
       setEditsReady(false);
       lastRevalidatedAt.current = 0;
@@ -275,10 +569,11 @@ export function NotesWorkspace({
     }
     const cached = loadCachedNotes(identityId, contractId, NETWORK);
     if (cached && cached.length > 0) {
-      setNotes(cached);
+      rawNotesRef.current = cached;
+      void applyRawNotes(cached);
       // Sync the ref immediately so the revalidation that runs in this same
       // turn sees `hadNotes=true` and won't wipe the list on a network error.
-      notesRef.current = cached;
+      notesRef.current = cached.map(redactEncryptedNote);
       // Auto-select the first cached note on desktop so the editor pane has
       // something to show before listMyNotes resolves. Mobile keeps the list
       // view as today.
@@ -293,7 +588,7 @@ export function NotesWorkspace({
     // re-trigger this effect on every list change. `sdk` is in the deps so the
     // reload re-runs once a rehydrated session finishes connecting.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identityId, contractId, status, sdk]);
+  }, [identityId, contractId, status, sdk, applyRawNotes]);
 
   const loadTokenRef = useRef(0);
 
@@ -303,8 +598,18 @@ export function NotesWorkspace({
       const token = ++loadTokenRef.current;
       if (!hydrated) setDetailLoading(true);
       try {
-        const note = await getNote({ sdk, contractId, noteId, log });
-        if (loadTokenRef.current !== token) return;
+        const rawNote = await getNote({ sdk, contractId, noteId, log });
+        const encryptionStateVersion = encryptionStateVersionRef.current;
+        const note = rawNote
+          ? (
+              await decorateRawNotes([rawNote], encryptionPassphraseRef.current)
+            )[0]
+          : null;
+        if (
+          loadTokenRef.current !== token ||
+          encryptionStateVersion !== encryptionStateVersionRef.current
+        )
+          return;
         setSelectedNote(note);
         if (!note) {
           setTitle("");
@@ -317,42 +622,48 @@ export function NotesWorkspace({
         // ordering, and a future cold reload reflect the newest revision.
         const prev = notesRef.current;
         const idx = prev.findIndex((n) => n.id === note.id);
+        let statusNotes = prev;
         if (idx === -1 || prev[idx].revision !== note.revision) {
           const merged =
             idx === -1
               ? [note, ...prev]
               : prev.map((n, i) => (i === idx ? note : n));
+          statusNotes = merged;
           setNotes(merged);
           if (identityId && contractId) {
-            saveCachedNotes(identityId, contractId, NETWORK, merged);
+            const rawPrev = rawNotesRef.current;
+            const rawIdx = rawPrev.findIndex((n) => n.id === note.id);
+            const rawMerged = rawNote
+              ? rawIdx === -1
+                ? [rawNote, ...rawPrev]
+                : rawPrev.map((n, i) => (i === rawIdx ? rawNote : n))
+              : rawPrev;
+            rawNotesRef.current = rawMerged;
+            saveCachedNotes(identityId, contractId, NETWORK, rawMerged);
           }
+        } else {
+          statusNotes = prev.map((n, i) => (i === idx ? note : n));
         }
-        const nextTitle = note.title ?? "";
-        const nextMessage = note.message ?? "";
-        const priorBaselineTitle = baselineTitleRef.current;
-        const priorBaselineMessage = baselineMessageRef.current;
-        const wasDirty =
-          titleRef.current !== priorBaselineTitle ||
-          messageRef.current !== priorBaselineMessage;
+        if (!reconcileEncryptionStatus(statusNotes)) return;
         const chainChanged =
-          nextTitle !== priorBaselineTitle ||
-          nextMessage !== priorBaselineMessage;
-        setBaselineTitle(nextTitle);
-        setBaselineMessage(nextMessage);
-        if (!wasDirty) {
-          setTitle(nextTitle);
-          setMessage(nextMessage);
-          setConflictWarning(null);
-        } else if (chainChanged) {
-          setConflictWarning(STALE_EDIT_WARNING);
-        }
+          (note.title ?? "") !== baselineTitleRef.current ||
+          note.message !== baselineMessageRef.current;
+        syncSelectedNoteFields(note, chainChanged ? STALE_EDIT_WARNING : null);
       } catch (err) {
         if (loadTokenRef.current === token) setError(errorMessage(err));
       } finally {
         if (loadTokenRef.current === token) setDetailLoading(false);
       }
     },
-    [contractId, identityId, log, sdk],
+    [
+      contractId,
+      decorateRawNotes,
+      identityId,
+      log,
+      reconcileEncryptionStatus,
+      sdk,
+      syncSelectedNoteFields,
+    ],
   );
 
   useEffect(() => {
@@ -459,8 +770,14 @@ export function NotesWorkspace({
     }
     if (messageOversize) {
       setError(
-        `Body exceeds the ${FIELD_BYTE_LIMIT}-byte field limit (${messageBytes} B).`,
+        encryptionActive
+          ? `Encrypted note exceeds the ${FIELD_BYTE_LIMIT}-byte field limit (${messageBytes} B).`
+          : `Body exceeds the ${FIELD_BYTE_LIMIT}-byte field limit (${messageBytes} B).`,
       );
+      return;
+    }
+    if (encryptionActive && !encryptionPassphraseRef.current) {
+      setError("Unlock encrypted notes before saving encrypted content.");
       return;
     }
 
@@ -472,13 +789,27 @@ export function NotesWorkspace({
     const submittedTitle = title;
     const submittedMessage = message;
     try {
+      const payload = encryptionPassphraseRef.current
+        ? await encryptNotePayload({
+            title: submittedTitle,
+            message: submittedMessage,
+            passphrase: encryptionPassphraseRef.current,
+          })
+        : { title: submittedTitle, message: submittedMessage };
+      const payloadBytes = byteLength(payload.message);
+      if (payloadBytes > FIELD_BYTE_LIMIT) {
+        setError(
+          `Encrypted body exceeds the ${FIELD_BYTE_LIMIT}-byte field limit (${payloadBytes} B).`,
+        );
+        return;
+      }
       if (selectedId === "new" || selectedId === null) {
         const noteId = await createNote({
           sdk,
           keyManager,
           contractId,
-          title,
-          message,
+          title: payload.title,
+          message: payload.message,
           log: withDetail(log, "documents.create"),
         });
         log("Note created.", {
@@ -498,8 +829,8 @@ export function NotesWorkspace({
           keyManager,
           contractId,
           noteId: selectedId,
-          title,
-          message,
+          title: payload.title,
+          message: payload.message,
           log: withDetail(log, "documents.get → replace"),
         });
         log("Note saved.", {
@@ -528,20 +859,26 @@ export function NotesWorkspace({
         selectedNote
       ) {
         try {
-          const latest = await getNote({
+          const rawLatest = await getNote({
             sdk,
             contractId,
             noteId: selectedId,
             log,
           });
+          const encryptionStateVersion = encryptionStateVersionRef.current;
+          const latest = rawLatest
+            ? (
+                await decorateRawNotes(
+                  [rawLatest],
+                  encryptionPassphraseRef.current,
+                )
+              )[0]
+            : null;
+          if (encryptionStateVersion !== encryptionStateVersionRef.current) {
+            return;
+          }
           if (latest && latest.revision !== selectedNote.revision) {
-            setSelectedNote(latest);
-            const latestTitle = latest.title ?? "";
-            const latestMessage = latest.message ?? "";
-            setBaselineTitle(latestTitle);
-            setBaselineMessage(latestMessage);
-            baselineTitleRef.current = latestTitle;
-            baselineMessageRef.current = latestMessage;
+            syncSelectedNoteFields(latest, STALE_EDIT_WARNING);
             // The conflict warning is the actionable info ("your retry will
             // overwrite"); the underlying nonce/network error is internal
             // detail. Clear the error so the warning isn't masked.
@@ -549,16 +886,29 @@ export function NotesWorkspace({
             // Fold the chain's content into the list/cache too.
             const prev = notesRef.current;
             const idx = prev.findIndex((n) => n.id === latest.id);
+            let statusNotes = prev;
             if (idx === -1 || prev[idx].revision !== latest.revision) {
               const merged =
                 idx === -1
                   ? [latest, ...prev]
                   : prev.map((n, i) => (i === idx ? latest : n));
+              statusNotes = merged;
               setNotes(merged);
               if (identityId && contractId) {
-                saveCachedNotes(identityId, contractId, NETWORK, merged);
+                const rawPrev = rawNotesRef.current;
+                const rawIdx = rawPrev.findIndex((n) => n.id === latest.id);
+                const rawMerged = rawLatest
+                  ? rawIdx === -1
+                    ? [rawLatest, ...rawPrev]
+                    : rawPrev.map((n, i) => (i === rawIdx ? rawLatest : n))
+                  : rawPrev;
+                rawNotesRef.current = rawMerged;
+                saveCachedNotes(identityId, contractId, NETWORK, rawMerged);
               }
+            } else {
+              statusNotes = prev.map((n, i) => (i === idx ? latest : n));
             }
+            if (!reconcileEncryptionStatus(statusNotes)) return;
             setConflictWarning(STALE_EDIT_WARNING);
           }
         } catch {
@@ -638,64 +988,164 @@ export function NotesWorkspace({
           onAction={onOpenSettings}
         />
       ) : (
-        <div className="gap-5 max-md:flex max-md:min-h-0 max-md:flex-1 max-md:flex-col md:grid md:h-[calc(100vh-175px)] md:min-h-[520px] md:grid-cols-[260px_minmax(0,1fr)] md:gap-0 md:overflow-hidden md:rounded-[24px] md:border md:border-line md:bg-surface md:shadow-[0_20px_60px_-36px_rgba(0,0,0,0.45)] lg:grid-cols-[340px_minmax(0,1fr)]">
-          <div
-            className={`min-h-0 max-md:flex-1 ${selectedId !== null ? "hidden md:flex" : "flex"} flex-col`}
-          >
-            <NoteList
-              notes={notes}
-              loading={listLoading}
-              revalidating={revalidating && notes.length > 0}
-              selectedId={selectedId}
-              onSelect={handleSelect}
-              onNew={handleNew}
-              canCreate={canMutate || isBrowsing}
-              newButtonLabel={canMutate ? "New note" : "Sign in to create"}
-            />
+        <>
+          <EncryptionPanel
+            key={`${identityId ?? ""}:${contractId ?? ""}:${status}:${encryptionUnlocked ? "unlocked" : "locked"}`}
+            unlocked={encryptionUnlocked}
+            error={encryptionError}
+            onUnlock={(passphrase) =>
+              void handleUnlockEncryptedNotes(passphrase)
+            }
+            onLock={handleLockEncryptedNotes}
+          />
+          <div className="gap-5 max-md:flex max-md:min-h-0 max-md:flex-1 max-md:flex-col md:grid md:h-[calc(100vh-220px)] md:min-h-[520px] md:grid-cols-[260px_minmax(0,1fr)] md:gap-0 md:overflow-hidden md:rounded-[24px] md:border md:border-line md:bg-surface md:shadow-[0_20px_60px_-36px_rgba(0,0,0,0.45)] lg:grid-cols-[340px_minmax(0,1fr)]">
+            <div
+              className={`min-h-0 max-md:flex-1 ${selectedId !== null ? "hidden md:flex" : "flex"} flex-col`}
+            >
+              <NoteList
+                notes={notes}
+                loading={listLoading}
+                revalidating={revalidating && notes.length > 0}
+                selectedId={selectedId}
+                onSelect={handleSelect}
+                onNew={handleNew}
+                canCreate={canMutate || isBrowsing}
+                newButtonLabel={canMutate ? "New note" : "Sign in to create"}
+              />
+            </div>
+            <div
+              className={`min-h-0 max-md:flex-1 ${selectedId === null ? "hidden md:flex" : "flex"} flex-col md:border-l md:border-line`}
+            >
+              <NoteEditor
+                isDesktop={isDesktop}
+                selectedId={selectedId}
+                note={selectedNote}
+                title={title}
+                message={message}
+                onTitleChange={setTitle}
+                onMessageChange={setMessage}
+                onSave={() => void handleSave()}
+                onDelete={requestDelete}
+                onBack={handleBack}
+                loading={detailLoading}
+                saving={saving}
+                deleting={deleting}
+                canEdit={canMutate && !selectedEncryptedLocked}
+                canDelete={Boolean(
+                  canMutate && selectedId && selectedId !== "new",
+                )}
+                isReadOnly={isBrowsing}
+                dirty={dirty}
+                messageBytes={messageBytes}
+                messageOversize={messageOversize}
+                byteLimitLabel={encryptionActive ? "Encrypted payload" : "Body"}
+                contractReady={contractReady}
+                contractId={contractId}
+                error={
+                  selectedEncryptedLocked
+                    ? selectedNote?.decryptError
+                      ? (selectedNote.decryptErrorMessage ??
+                        "Unable to decrypt this note with the provided passphrase.")
+                      : "Unlock encrypted notes to view or edit this note."
+                    : error
+                }
+                conflictWarning={
+                  selectedEncryptedLocked ? null : conflictWarning
+                }
+                onOpenLogin={onOpenLogin}
+                onOpenSettings={onOpenSettings}
+              />
+            </div>
           </div>
-          <div
-            className={`min-h-0 max-md:flex-1 ${selectedId === null ? "hidden md:flex" : "flex"} flex-col md:border-l md:border-line`}
-          >
-            <NoteEditor
-              isDesktop={isDesktop}
-              selectedId={selectedId}
-              note={selectedNote}
-              title={title}
-              message={message}
-              onTitleChange={setTitle}
-              onMessageChange={setMessage}
-              onSave={() => void handleSave()}
-              onDelete={requestDelete}
-              onBack={handleBack}
-              loading={detailLoading}
-              saving={saving}
-              deleting={deleting}
-              canEdit={canMutate}
-              canDelete={Boolean(
-                canMutate && selectedId && selectedId !== "new",
-              )}
-              isReadOnly={isBrowsing}
-              dirty={dirty}
-              messageBytes={messageBytes}
-              messageOversize={messageOversize}
-              contractReady={contractReady}
-              contractId={contractId}
-              error={error}
-              conflictWarning={conflictWarning}
-              onOpenLogin={onOpenLogin}
-              onOpenSettings={onOpenSettings}
-            />
-          </div>
-        </div>
+        </>
       )}
       <DeleteNoteModal
         open={deleteRequested}
-        noteTitle={title}
+        noteTitle={
+          selectedEncryptedLocked ? (selectedNote?.title ?? title) : title
+        }
         deleting={deleting}
         onCancel={() => setDeleteRequested(false)}
         onConfirm={() => void confirmDelete()}
       />
     </div>
+  );
+}
+
+function EncryptionPanel({
+  unlocked,
+  error,
+  onUnlock,
+  onLock,
+}: {
+  unlocked: boolean;
+  error: string | null;
+  onUnlock: (passphrase: string) => void;
+  onLock: () => void;
+}) {
+  const [passphrase, setPassphrase] = useState("");
+
+  if (unlocked) {
+    return (
+      <section className="flex flex-wrap items-center justify-between gap-3 rounded-[18px] border border-line bg-surface px-4 py-3 text-[12px] text-ink-3 shadow-[0_16px_45px_-34px_rgba(0,0,0,0.45)] max-md:mx-3">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-4">
+            Encrypted notes unlocked
+          </div>
+          <p className="mt-1">
+            New and edited notes are saved as encrypted envelopes in the
+            existing message field.
+          </p>
+          {error && <p className="mt-1 text-ink-4">{error}</p>}
+        </div>
+        <button
+          type="button"
+          onClick={onLock}
+          className="rounded-full border border-line-2 px-3 py-1.5 text-[12px] font-semibold text-ink-2 transition hover:border-accent-dim hover:text-ink"
+        >
+          Lock encrypted notes
+        </button>
+      </section>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        onUnlock(passphrase);
+      }}
+      className="flex flex-wrap items-end gap-3 rounded-[18px] border border-line bg-surface px-4 py-3 shadow-[0_16px_45px_-34px_rgba(0,0,0,0.45)] max-md:mx-3"
+    >
+      <label className="min-w-[220px] flex-1">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-4">
+          Unlock encrypted notes
+        </span>
+        <input
+          type="password"
+          value={passphrase}
+          onChange={(event) => setPassphrase(event.target.value)}
+          placeholder="Encryption passphrase"
+          autoComplete="off"
+          className="mt-1 w-full rounded-md border border-line bg-bg px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent-dim"
+        />
+      </label>
+      <button
+        type="submit"
+        className="rounded-full bg-accent px-4 py-2 text-[12px] font-semibold text-bg transition hover:bg-accent-dim"
+      >
+        Unlock
+      </button>
+      <p className="basis-full text-[11px] leading-5 text-ink-4">
+        Leave locked to browse plaintext notes. When unlocked, Dashnote encrypts
+        note title and body locally with PBKDF2-SHA256 + AES-GCM before saving.
+      </p>
+      {error && (
+        <p className="basis-full text-[11px] text-[color:var(--color-danger)]">
+          {error}
+        </p>
+      )}
+    </form>
   );
 }
 

@@ -24,6 +24,12 @@ export interface NoteRecord {
   createdAt: number | null;
   updatedAt: number | null;
   revision: number;
+  encrypted?: boolean;
+  locked?: boolean;
+  decryptError?: boolean;
+  decryptErrorMessage?: string;
+  rawTitle?: string | null;
+  rawMessage?: string;
 }
 
 function toTimestamp(
