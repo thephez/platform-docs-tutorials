@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -11,6 +12,14 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NotesWorkspace } from "../src/components/NotesWorkspace";
+import {
+  decryptNotePayload,
+  encryptedNotePayloadByteLength,
+  encryptNotePayload,
+  ENCRYPTED_NOTE_PREFIX,
+  ENCRYPTED_NOTE_TITLE,
+} from "../src/lib/encryptedNotes";
+import { FIELD_BYTE_LIMIT } from "../src/lib/fieldLimits";
 
 const {
   mockUseSession,
@@ -186,6 +195,586 @@ describe("NotesWorkspace", () => {
       expect(mockListMyNotes).toHaveBeenCalledTimes(2);
     });
     expect(screen.getByDisplayValue("Body only")).toBeTruthy();
+  });
+
+  it("encrypts new notes after the passphrase is unlocked", async () => {
+    mockUseSession.mockReturnValue(makeSession());
+    mockListMyNotes.mockResolvedValue([]);
+    mockCreateNote.mockResolvedValue("note-encrypted");
+
+    render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListMyNotes).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.change(screen.getByPlaceholderText(/encryption passphrase/i), {
+      target: { value: "encrypt me" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^unlock$/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/encrypted notes unlocked/i)).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /new note/i }));
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "Secret title" },
+    });
+    fireEvent.change(screen.getByLabelText(/body/i), {
+      target: { value: "Secret body" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create note/i }));
+
+    await waitFor(() => {
+      expect(mockCreateNote).toHaveBeenCalledTimes(1);
+    });
+    const params = mockCreateNote.mock.calls[0][0];
+    expect(params.title).toBe(ENCRYPTED_NOTE_TITLE);
+    expect(params.message.startsWith(ENCRYPTED_NOTE_PREFIX)).toBe(true);
+    expect(params.message).not.toContain("Secret title");
+    expect(params.message).not.toContain("Secret body");
+    await expect(
+      decryptNotePayload(params.message, "encrypt me"),
+    ).resolves.toEqual({
+      title: "Secret title",
+      message: "Secret body",
+    });
+  });
+
+  it("uses encrypted envelope bytes for the editor field limit when unlocked", async () => {
+    mockUseSession.mockReturnValue(makeSession());
+    mockListMyNotes.mockResolvedValue([]);
+    mockCreateNote.mockResolvedValue("note-encrypted");
+
+    render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListMyNotes).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.change(screen.getByPlaceholderText(/encryption passphrase/i), {
+      target: { value: "encrypt me" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^unlock$/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/encrypted notes unlocked/i)).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /new note/i }));
+    const largeBody = "a".repeat(FIELD_BYTE_LIMIT - 100);
+    expect(
+      encryptedNotePayloadByteLength({ title: "", message: largeBody }),
+    ).toBeGreaterThan(FIELD_BYTE_LIMIT);
+    fireEvent.change(screen.getByLabelText(/body/i), {
+      target: { value: largeBody },
+    });
+
+    expect(
+      (
+        screen.getByRole("button", {
+          name: /create note/i,
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    expect(
+      screen
+        .getAllByRole("progressbar")
+        .some((bar) =>
+          bar.getAttribute("title")?.startsWith("Encrypted payload:"),
+        ),
+    ).toBe(true);
+    expect(mockCreateNote).not.toHaveBeenCalled();
+  });
+
+  it("clears the unlocked passphrase when the identity changes", async () => {
+    mockUseSession.mockReturnValue(makeSession());
+    mockListMyNotes.mockResolvedValue([]);
+    mockCreateNote.mockResolvedValue("note-plain");
+
+    const { rerender } = render(
+      <NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => {
+      expect(mockListMyNotes).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.change(screen.getByPlaceholderText(/encryption passphrase/i), {
+      target: { value: "old identity passphrase" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^unlock$/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/encrypted notes unlocked/i)).toBeTruthy();
+    });
+
+    mockUseSession.mockReturnValue(makeSession({ identityId: "identity-2" }));
+    rerender(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByPlaceholderText(/encryption passphrase/i),
+      ).toBeTruthy();
+    });
+    expect(
+      (
+        screen.getByPlaceholderText(
+          /encryption passphrase/i,
+        ) as HTMLInputElement
+      ).value,
+    ).toBe("");
+
+    fireEvent.click(screen.getByRole("button", { name: /new note/i }));
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "Plain title" },
+    });
+    fireEvent.change(screen.getByLabelText(/body/i), {
+      target: { value: "Plain body" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create note/i }));
+
+    await waitFor(() => {
+      expect(mockCreateNote).toHaveBeenCalledTimes(1);
+    });
+    const params = mockCreateNote.mock.calls[0][0];
+    expect(params.title).toBe("Plain title");
+    expect(params.message).toBe("Plain body");
+  });
+
+  it("hides dirty decrypted content when encrypted notes are locked", async () => {
+    const encrypted = await encryptNotePayload({
+      title: "Secret title",
+      message: "Secret body",
+      passphrase: "encrypt me",
+    });
+    const encryptedNote = {
+      id: "note-encrypted",
+      ownerId: "identity-1",
+      title: encrypted.title,
+      message: encrypted.message,
+      createdAt: 1000,
+      updatedAt: 2000,
+      revision: 1,
+    };
+
+    mockUseSession.mockReturnValue(makeSession());
+    mockListMyNotes.mockResolvedValue([encryptedNote]);
+    mockGetNote.mockResolvedValue(encryptedNote);
+
+    render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/unlock encrypted notes to view or edit/i),
+      ).toBeTruthy();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText(/encryption passphrase/i), {
+      target: { value: "encrypt me" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^unlock$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Secret body")).toBeTruthy();
+    });
+
+    fireEvent.change(screen.getByLabelText(/body/i), {
+      target: { value: "Dirty secret" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /lock encrypted notes/i }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/unlock encrypted notes to view or edit/i),
+      ).toBeTruthy();
+    });
+    expect((screen.getByLabelText(/title/i) as HTMLInputElement).value).toBe(
+      ENCRYPTED_NOTE_TITLE,
+    );
+    expect((screen.getByLabelText(/body/i) as HTMLTextAreaElement).value).toBe(
+      "",
+    );
+    expect(screen.queryByDisplayValue("Dirty secret")).toBeNull();
+  });
+
+  it("clears unsaved encrypted drafts when encrypted notes are locked", async () => {
+    mockUseSession.mockReturnValue(makeSession());
+    mockListMyNotes.mockResolvedValue([]);
+
+    render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListMyNotes).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.change(screen.getByPlaceholderText(/encryption passphrase/i), {
+      target: { value: "encrypt me" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^unlock$/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/encrypted notes unlocked/i)).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /new note/i }));
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "Secret draft" },
+    });
+    fireEvent.change(screen.getByLabelText(/body/i), {
+      target: { value: "Unsaved secret" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /lock encrypted notes/i }),
+    );
+
+    expect(screen.queryByDisplayValue("Secret draft")).toBeNull();
+    expect(screen.queryByDisplayValue("Unsaved secret")).toBeNull();
+  });
+
+  it("preserves dirty plaintext edits when encrypted notes are locked", async () => {
+    const plainNote = {
+      id: "note-plain",
+      ownerId: "identity-1",
+      title: "Plain title",
+      message: "Plain body",
+      createdAt: 1000,
+      updatedAt: 2000,
+      revision: 1,
+    };
+
+    mockUseSession.mockReturnValue(makeSession());
+    mockListMyNotes.mockResolvedValue([plainNote]);
+    mockGetNote.mockResolvedValue(plainNote);
+
+    render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Plain body")).toBeTruthy();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText(/encryption passphrase/i), {
+      target: { value: "encrypt me" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^unlock$/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/encrypted notes unlocked/i)).toBeTruthy();
+    });
+
+    fireEvent.change(screen.getByLabelText(/body/i), {
+      target: { value: "Unsaved plaintext draft" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /lock encrypted notes/i }),
+    );
+
+    expect(screen.getByDisplayValue("Unsaved plaintext draft")).toBeTruthy();
+  });
+
+  it("does not stay unlocked after a failed encrypted note decrypt", async () => {
+    const encrypted = await encryptNotePayload({
+      title: "Secret title",
+      message: "Secret body",
+      passphrase: "correct passphrase",
+    });
+    const encryptedNote = {
+      id: "note-encrypted",
+      ownerId: "identity-1",
+      title: encrypted.title,
+      message: encrypted.message,
+      createdAt: 1000,
+      updatedAt: 2000,
+      revision: 1,
+    };
+
+    mockUseSession.mockReturnValue(makeSession());
+    mockListMyNotes.mockResolvedValue([encryptedNote]);
+    mockGetNote.mockResolvedValue(encryptedNote);
+    mockCreateNote.mockResolvedValue("note-plain");
+
+    render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/unlock encrypted notes to view or edit/i),
+      ).toBeTruthy();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText(/encryption passphrase/i), {
+      target: { value: "wrong passphrase" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^unlock$/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/unable to decrypt encrypted notes/i),
+      ).toBeTruthy();
+    });
+    expect(screen.queryByText(/encrypted notes unlocked/i)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /new note/i }));
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "Plain title" },
+    });
+    fireEvent.change(screen.getByLabelText(/body/i), {
+      target: { value: "Plain body" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create note/i }));
+
+    await waitFor(() => {
+      expect(mockCreateNote).toHaveBeenCalledTimes(1);
+    });
+    const params = mockCreateNote.mock.calls[0][0];
+    expect(params.title).toBe("Plain title");
+    expect(params.message).toBe("Plain body");
+  });
+
+  it("clears stale unlock state when encrypted notes arrive after a wrong passphrase", async () => {
+    const encrypted = await encryptNotePayload({
+      title: "Late secret",
+      message: "Late body",
+      passphrase: "correct passphrase",
+    });
+    const encryptedNote = {
+      id: "note-encrypted",
+      ownerId: "identity-1",
+      title: encrypted.title,
+      message: encrypted.message,
+      createdAt: 1000,
+      updatedAt: 2000,
+      revision: 1,
+    };
+    let resolveNotes!: (notes: (typeof encryptedNote)[]) => void;
+
+    mockUseSession.mockReturnValue(makeSession());
+    mockListMyNotes.mockReturnValue(
+      new Promise((resolve) => {
+        resolveNotes = resolve;
+      }),
+    );
+
+    render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText(/encryption passphrase/i), {
+      target: { value: "wrong passphrase" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^unlock$/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/encrypted notes unlocked/i)).toBeTruthy();
+    });
+
+    await act(async () => {
+      resolveNotes([encryptedNote]);
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/unable to decrypt encrypted notes/i),
+      ).toBeTruthy();
+    });
+    expect(screen.queryByText(/encrypted notes unlocked/i)).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: /new note/i }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
+
+  it("clears an encrypted draft when a later refresh rejects the passphrase", async () => {
+    const encrypted = await encryptNotePayload({
+      title: "Late secret",
+      message: "Late body",
+      passphrase: "correct passphrase",
+    });
+    const encryptedNote = {
+      id: "note-encrypted",
+      ownerId: "identity-1",
+      title: encrypted.title,
+      message: encrypted.message,
+      createdAt: 1000,
+      updatedAt: 2000,
+      revision: 1,
+    };
+    let resolveRefresh!: (notes: (typeof encryptedNote)[]) => void;
+
+    mockUseSession.mockReturnValue(makeSession());
+    mockListMyNotes.mockResolvedValueOnce([]).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRefresh = resolve;
+      }),
+    );
+
+    render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListMyNotes).toHaveBeenCalledTimes(1);
+    });
+    fireEvent.change(screen.getByPlaceholderText(/encryption passphrase/i), {
+      target: { value: "wrong passphrase" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^unlock$/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/encrypted notes unlocked/i)).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /new note/i }));
+    fireEvent.change(screen.getByLabelText(/title/i), {
+      target: { value: "Draft secret" },
+    });
+    fireEvent.change(screen.getByLabelText(/body/i), {
+      target: { value: "Draft body" },
+    });
+
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 100_000_000);
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      value: false,
+    });
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await waitFor(() => {
+      expect(mockListMyNotes).toHaveBeenCalledTimes(2);
+    });
+
+    await act(async () => {
+      resolveRefresh([encryptedNote]);
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/unable to decrypt encrypted notes/i),
+      ).toBeTruthy();
+    });
+    expect(screen.queryByDisplayValue("Draft secret")).toBeNull();
+    expect(screen.queryByDisplayValue("Draft body")).toBeNull();
+    expect(mockCreateNote).not.toHaveBeenCalled();
+  });
+
+  it("does not unlock encryption when Web Crypto is unavailable", async () => {
+    mockUseSession.mockReturnValue(makeSession());
+    mockListMyNotes.mockResolvedValue([]);
+
+    render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListMyNotes).toHaveBeenCalledTimes(1);
+    });
+
+    vi.stubGlobal("crypto", undefined);
+    fireEvent.change(screen.getByPlaceholderText(/encryption passphrase/i), {
+      target: { value: "encrypt me" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^unlock$/i }));
+
+    expect(
+      screen.getByText(/web crypto is required to encrypt notes/i),
+    ).toBeTruthy();
+    expect(screen.queryByText(/encrypted notes unlocked/i)).toBeNull();
+  });
+
+  it("unlocks matching encrypted notes while leaving different-passphrase notes locked", async () => {
+    const firstEncrypted = await encryptNotePayload({
+      title: "First secret",
+      message: "First body",
+      passphrase: "first passphrase",
+    });
+    const secondEncrypted = await encryptNotePayload({
+      title: "Second secret",
+      message: "Second body",
+      passphrase: "second passphrase",
+    });
+    const firstNote = {
+      id: "note-first",
+      ownerId: "identity-1",
+      title: firstEncrypted.title,
+      message: firstEncrypted.message,
+      createdAt: 1000,
+      updatedAt: 2000,
+      revision: 1,
+    };
+    const secondNote = {
+      id: "note-second",
+      ownerId: "identity-1",
+      title: secondEncrypted.title,
+      message: secondEncrypted.message,
+      createdAt: 1000,
+      updatedAt: 2000,
+      revision: 1,
+    };
+
+    mockUseSession.mockReturnValue(makeSession());
+    mockListMyNotes.mockResolvedValue([firstNote, secondNote]);
+    mockGetNote.mockResolvedValue(firstNote);
+
+    render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/unlock encrypted notes to view or edit/i),
+      ).toBeTruthy();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText(/encryption passphrase/i), {
+      target: { value: "first passphrase" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^unlock$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/encrypted notes unlocked/i)).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("First secret")).toBeTruthy();
+      expect(screen.getByDisplayValue("First body")).toBeTruthy();
+    });
+    expect(
+      screen.getByText(/some encrypted notes use a different passphrase/i),
+    ).toBeTruthy();
+    expect(screen.getByText("Unable to decrypt")).toBeTruthy();
+  });
+
+  it("allows locked encrypted notes to be deleted without decrypting them", async () => {
+    const encrypted = await encryptNotePayload({
+      title: "Delete me",
+      message: "Forgotten secret",
+      passphrase: "lost passphrase",
+    });
+    const encryptedNote = {
+      id: "note-encrypted",
+      ownerId: "identity-1",
+      title: encrypted.title,
+      message: encrypted.message,
+      createdAt: 1000,
+      updatedAt: 2000,
+      revision: 1,
+    };
+
+    mockUseSession.mockReturnValue(makeSession());
+    mockListMyNotes
+      .mockResolvedValueOnce([encryptedNote])
+      .mockResolvedValueOnce([]);
+    mockGetNote.mockResolvedValue(encryptedNote);
+    mockDeleteNote.mockResolvedValue(undefined);
+
+    render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/unlock encrypted notes to view or edit/i),
+      ).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+    const dialog = screen.getByRole("dialog", { name: /^delete note$/i });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^delete$/i }));
+
+    await waitFor(() => {
+      expect(mockDeleteNote).toHaveBeenCalledWith(
+        expect.objectContaining({ noteId: "note-encrypted" }),
+      );
+    });
   });
 
   it("shows the empty notebook state for a valid contract with no notes", async () => {

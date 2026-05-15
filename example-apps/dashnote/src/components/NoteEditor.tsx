@@ -24,6 +24,7 @@ interface NoteEditorProps {
   dirty: boolean;
   messageBytes: number;
   messageOversize: boolean;
+  byteLimitLabel: string;
   contractReady: boolean;
   contractId: string | null;
   error: string | null;
@@ -52,6 +53,7 @@ export function NoteEditor({
   dirty,
   messageBytes,
   messageOversize,
+  byteLimitLabel,
   contractReady,
   contractId,
   error,
@@ -327,7 +329,11 @@ export function NoteEditor({
               />
               {(messageBytes / FIELD_BYTE_LIMIT >= 0.75 || messageOversize) && (
                 <div className="mt-2 md:hidden">
-                  <FillBar bytes={messageBytes} limit={FIELD_BYTE_LIMIT} />
+                  <FillBar
+                    bytes={messageBytes}
+                    label={byteLimitLabel}
+                    limit={FIELD_BYTE_LIMIT}
+                  />
                 </div>
               )}
               {isReadOnly && (
@@ -357,7 +363,8 @@ export function NoteEditor({
                 <path d="M12 16v-4M12 8h.01" />
               </svg>
               <span>
-                Notes are stored publicly on Dash Platform — not encrypted.
+                Unencrypted notes are public; encrypted notes store only an
+                encrypted payload.
               </span>
             </div>
 
@@ -430,7 +437,15 @@ export function NoteEditor({
   );
 }
 
-function FillBar({ bytes, limit }: { bytes: number; limit: number }) {
+function FillBar({
+  bytes,
+  label = "Body",
+  limit,
+}: {
+  bytes: number;
+  label?: string;
+  limit: number;
+}) {
   const pct = Math.min(100, (bytes / limit) * 100);
   const over = bytes > limit;
   const near = !over && pct >= 90;
@@ -440,8 +455,8 @@ function FillBar({ bytes, limit }: { bytes: number; limit: number }) {
       ? "bg-[color:var(--color-warning)]"
       : "bg-accent";
   const tooltip = over
-    ? `${bytes} / ${limit} bytes — over limit`
-    : `${bytes} / ${limit} bytes`;
+    ? `${label}: ${bytes} / ${limit} bytes — over limit`
+    : `${label}: ${bytes} / ${limit} bytes`;
   return (
     <div
       role="progressbar"
