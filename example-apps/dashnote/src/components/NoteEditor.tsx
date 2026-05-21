@@ -6,9 +6,14 @@ import { formatRelativeTime, formatTimestamp } from "../lib/format";
 import { NoteJsonDrawer } from "./NoteJsonDrawer";
 import { OperationResultNotice } from "./OperationResultNotice";
 
+type EditorNoteRecord = NoteRecord & {
+  encryptionState?: "plaintext" | "decrypted" | "locked" | "invalid";
+};
+
 interface NoteEditorProps {
   selectedId: string | "new" | null;
-  note: NoteRecord | null;
+  note: EditorNoteRecord | null;
+  rawNote?: NoteRecord | null;
   title: string;
   message: string;
   onTitleChange: (value: string) => void;
@@ -37,6 +42,7 @@ interface NoteEditorProps {
 export function NoteEditor({
   selectedId,
   note,
+  rawNote = note,
   title,
   message,
   onTitleChange,
@@ -64,6 +70,8 @@ export function NoteEditor({
   const hasSelection = selectedId !== null;
   const isNew = selectedId === "new";
   const oversize = messageOversize;
+  const lockedEncryptedNote = note?.encryptionState === "locked";
+  const invalidEncryptedNote = note?.encryptionState === "invalid";
   const [jsonOpen, setJsonOpen] = useState(false);
 
   // Cmd/Ctrl-S triggers Save (matches the keyboard hint chip).
@@ -256,6 +264,23 @@ export function NoteEditor({
           </OperationResultNotice>
         )}
 
+        {lockedEncryptedNote && (
+          <OperationResultNotice title="Encrypted note locked">
+            Sign in with an encryption-capable session to decrypt and edit this
+            note.
+          </OperationResultNotice>
+        )}
+
+        {invalidEncryptedNote && (
+          <OperationResultNotice
+            tone="error"
+            title="Encrypted note unavailable"
+          >
+            This note could not be decrypted with the current document context
+            and key.
+          </OperationResultNotice>
+        )}
+
         {!contractReady ? (
           <OperationResultNotice title="No contract selected">
             <div className="space-y-3">
@@ -304,7 +329,7 @@ export function NoteEditor({
               />
             </svg>
           </div>
-        ) : (
+        ) : lockedEncryptedNote || invalidEncryptedNote ? null : (
           <>
             <label className="relative flex min-h-0 flex-1 flex-col">
               <input
@@ -356,9 +381,7 @@ export function NoteEditor({
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 16v-4M12 8h.01" />
               </svg>
-              <span>
-                Notes are stored publicly on Dash Platform — not encrypted.
-              </span>
+              <span>Encrypted notes stay encrypted on Dash Platform.</span>
             </div>
 
             {canDelete && (
@@ -422,7 +445,7 @@ export function NoteEditor({
       )}
       <NoteJsonDrawer
         open={jsonOpen}
-        note={note}
+        note={rawNote}
         contractId={contractId}
         onClose={() => setJsonOpen(false)}
       />

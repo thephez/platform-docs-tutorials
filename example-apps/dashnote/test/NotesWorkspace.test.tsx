@@ -11,6 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NotesWorkspace } from "../src/components/NotesWorkspace";
+import { encryptNoteForStorage } from "../src/lib/encryptedNotes";
 
 const {
   mockUseSession,
@@ -538,6 +539,80 @@ describe("NotesWorkspace", () => {
         screen.queryByText(/this note changed on the network/i),
       ).toBeNull();
     });
+
+    it("keeps decrypted content after saving an encrypted revision while key state is settling", async () => {
+      const keyMaterial = {
+        keyId: 4,
+        keyVersion: 1,
+        privateKeyBytes: new Uint8Array(32).fill(9),
+      };
+      const getEncryptionKeyMaterial = vi
+        .fn()
+        // Initial session effect stays pending so React state still has no
+        // key when the user saves. handleSave must carry its freshly-fetched
+        // key through the immediate post-save reload path.
+        .mockImplementationOnce(() => new Promise(() => {}))
+        .mockResolvedValue(keyMaterial);
+      mockUseSession.mockReturnValue(
+        makeSession({
+          keyManager: {
+            getEncryptionKeyMaterial,
+          },
+        }),
+      );
+      const stored = await encryptNoteForStorage({
+        title: "Local title",
+        message: "User edited body",
+        keyMaterial,
+        context: {
+          network: "testnet",
+          contractId: "contract-1",
+          documentType: "note",
+          ownerId: "identity-1",
+          documentId: "note-conflict",
+        },
+      });
+      const saved = {
+        ...initial,
+        title: stored.title,
+        message: stored.message,
+        revision: 2,
+        updatedAt: 3000,
+      };
+      mockListMyNotes
+        .mockResolvedValueOnce([initial])
+        .mockResolvedValue([saved]);
+      mockGetNote
+        .mockResolvedValueOnce(initial) // initial detail load
+        .mockResolvedValue(saved); // post-save detail/reload
+      mockUpdateNote.mockResolvedValue(2n);
+
+      render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(
+          (screen.getByLabelText(/^body$/i) as HTMLTextAreaElement).value,
+        ).toBe("Local body");
+      });
+
+      fireEvent.change(screen.getByLabelText(/^body$/i), {
+        target: { value: "User edited body" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+      await waitFor(() => {
+        expect(mockUpdateNote).toHaveBeenCalledTimes(1);
+      });
+      await waitFor(() => {
+        expect(
+          (screen.getByLabelText(/^body$/i) as HTMLTextAreaElement).value,
+        ).toBe("User edited body");
+      });
+      expect(screen.queryByText(/encrypted note locked/i)).toBeNull();
+      expect(
+        screen.queryByText(/this note changed on the network/i),
+      ).toBeNull();
+    });
   });
 
   it("surfaces query failures as a regular editor error", async () => {
@@ -625,6 +700,112 @@ describe("NotesWorkspace", () => {
     fireEvent.change(search, { target: { value: "" } });
     expect(screen.getByText("Grocery list")).toBeTruthy();
     expect(screen.getByText("Travel ideas")).toBeTruthy();
+  });
+
+  it("selects an encrypted note without key material as locked without editable fields", async () => {
+    stubMatchMedia(false);
+    const stored = await encryptNoteForStorage({
+      title: "Private title",
+      message: "Private body",
+      keyMaterial: {
+        keyId: 4,
+        keyVersion: 1,
+        privateKeyBytes: new Uint8Array(32).fill(5),
+      },
+      context: {
+        network: "testnet",
+        contractId: "contract-1",
+        documentType: "note",
+        ownerId: "identity-1",
+        documentId: "locked-note",
+      },
+    });
+    const encryptedNote = {
+      id: "locked-note",
+      ownerId: "identity-1",
+      title: stored.title,
+      message: stored.message,
+      createdAt: 1000,
+      updatedAt: 2000,
+      revision: 1,
+    };
+    mockUseSession.mockReturnValue(
+      makeSession({
+        keyManager: {},
+      }),
+    );
+    mockListMyNotes.mockResolvedValue([encryptedNote]);
+    mockGetNote.mockResolvedValue(encryptedNote);
+
+    render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Encrypted note")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("Encrypted note"));
+
+    await waitFor(() => {
+      expect(screen.getByText(/encrypted note locked/i)).toBeTruthy();
+    });
+    expect(mockGetNote).toHaveBeenCalledWith(
+      expect.objectContaining({ noteId: "locked-note" }),
+    );
+    expect(screen.queryByLabelText(/^title$/i)).toBeNull();
+    expect(screen.queryByLabelText(/^body$/i)).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /^save$/i }).hasAttribute("disabled"),
+    ).toBe(true);
+  });
+
+  it("uses the decrypted in-memory cache immediately when reselecting an encrypted note", async () => {
+    stubMatchMedia(false);
+    const keyMaterial = {
+      keyId: 4,
+      keyVersion: 1,
+      privateKeyBytes: new Uint8Array(32).fill(5),
+    };
+    const stored = await encryptNoteForStorage({
+      title: "Private title",
+      message: "Private body",
+      keyMaterial,
+      context: {
+        network: "testnet",
+        contractId: "contract-1",
+        documentType: "note",
+        ownerId: "identity-1",
+        documentId: "cached-encrypted-note",
+      },
+    });
+    const encryptedNote = {
+      id: "cached-encrypted-note",
+      ownerId: "identity-1",
+      title: stored.title,
+      message: stored.message,
+      createdAt: 1000,
+      updatedAt: 2000,
+      revision: 1,
+    };
+    mockUseSession.mockReturnValue(
+      makeSession({
+        keyManager: {
+          getEncryptionKeyMaterial: vi.fn().mockResolvedValue(keyMaterial),
+        },
+      }),
+    );
+    mockListMyNotes.mockResolvedValue([encryptedNote]);
+    mockGetNote.mockImplementation(() => new Promise(() => {}));
+
+    render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Private title")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("Private title"));
+
+    expect(
+      (screen.getByLabelText(/^body$/i) as HTMLTextAreaElement).value,
+    ).toBe("Private body");
+    expect(screen.queryByText(/encrypted note locked/i)).toBeNull();
   });
 
   describe("mobile", () => {

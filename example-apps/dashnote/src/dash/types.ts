@@ -10,9 +10,16 @@ export interface DashAuth {
   signer: IdentitySigner;
 }
 
+export interface DashEncryptionKeyMaterial {
+  keyId: number;
+  keyVersion: number;
+  privateKeyBytes: Uint8Array;
+}
+
 export interface DashKeyManager {
   readonly identityId: string | null | undefined;
   getAuth(): Promise<DashAuth>;
+  getEncryptionKeyMaterial?: () => Promise<DashEncryptionKeyMaterial | null>;
 }
 
 export interface DashDocumentLike {

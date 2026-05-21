@@ -7,8 +7,18 @@
  *   sdk.documents.replace({ document, identityKey, signer })
  */
 import type { Logger } from "../lib/logger";
+import { encryptNoteForStorage } from "../lib/encryptedNotes";
 import { loadSdkModule } from "./sdkModule";
-import type { DashKeyManager, DashSdk } from "./types";
+import type {
+  DashEncryptionKeyMaterial,
+  DashKeyManager,
+  DashSdk,
+} from "./types";
+
+interface NoteWriteEncryptionOptions {
+  network: "testnet" | "mainnet";
+  keyMaterial: DashEncryptionKeyMaterial;
+}
 
 export interface UpdateNoteParams {
   sdk: DashSdk;
@@ -17,6 +27,7 @@ export interface UpdateNoteParams {
   noteId: string;
   title?: string;
   message: string;
+  encryption?: NoteWriteEncryptionOptions | null;
   log?: Logger;
 }
 
@@ -27,6 +38,7 @@ export async function updateNote({
   noteId,
   title,
   message,
+  encryption,
   log,
 }: UpdateNoteParams): Promise<bigint> {
   log?.(`Saving note ${noteId}…`);
@@ -39,10 +51,28 @@ export async function updateNote({
   const { Document } = await loadSdkModule();
   const revision = BigInt(existingDoc.revision ?? 0) + 1n;
   const trimmedTitle = title?.trim();
+  const stored = encryption
+    ? await encryptNoteForStorage({
+        title: trimmedTitle,
+        message,
+        keyMaterial: encryption.keyMaterial,
+        context: {
+          network: encryption.network,
+          contractId,
+          documentType: "note",
+          ownerId: String(identity.id),
+          documentId: noteId,
+        },
+      })
+    : null;
   const document = new Document({
     properties: {
-      ...(trimmedTitle ? { title: trimmedTitle } : {}),
-      message,
+      ...(stored
+        ? { title: stored.title, message: stored.message }
+        : {
+            ...(trimmedTitle ? { title: trimmedTitle } : {}),
+            message,
+          }),
     },
     documentTypeName: "note",
     dataContractId: contractId,

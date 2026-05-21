@@ -457,6 +457,23 @@ class IdentityKeyManager {
   }
 
   /**
+   * Return raw key material for apps that need local encryption/decryption.
+   * Dashnote uses this for tutorial-only client-side note encryption.
+   *
+   * @returns {Promise<{ keyId: number, keyVersion: number, privateKeyBytes: Uint8Array } | null>}
+   */
+  async getEncryptionKeyMaterial() {
+    const key = this.keys.encryption;
+    if (!key?.privateKeyWif) return null;
+    const privateKey = PrivateKey.fromWIF(key.privateKeyWif);
+    return {
+      keyId: key.keyId,
+      keyVersion: 1,
+      privateKeyBytes: privateKey.toBytes(),
+    };
+  }
+
+  /**
    * MASTER — identity updates (add/disable keys).
    * @param {string[]} [additionalKeyWifs] - WIFs for new keys being added
    * @returns {Promise<{ identity: Identity, identityKey: IdentityPublicKey | undefined, signer: IdentitySigner }>}

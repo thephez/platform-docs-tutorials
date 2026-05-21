@@ -95,6 +95,25 @@ describe("NoteEditor read-only sign-in surface", () => {
     expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull();
   });
 
+  it("does not render locked encrypted placeholder text as editable fields", () => {
+    renderEditor({
+      note: {
+        ...makeNote(),
+        title: "Encrypted note",
+        message:
+          "Sign in with an encryption-capable session to decrypt this note.",
+        encryptionState: "locked",
+      } as never,
+      title: "",
+      message: "",
+      canEdit: false,
+    });
+
+    expect(screen.getByText(/encrypted note locked/i)).toBeTruthy();
+    expect(screen.queryByLabelText(/^title$/i)).toBeNull();
+    expect(screen.queryByLabelText(/^body$/i)).toBeNull();
+  });
+
   it("positions the read-only overlay above the inputs (last sibling, absolute, z-10)", () => {
     renderEditor({ isReadOnly: true });
 
