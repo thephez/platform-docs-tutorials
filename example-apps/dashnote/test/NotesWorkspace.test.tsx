@@ -139,19 +139,9 @@ describe("NotesWorkspace", () => {
     );
   });
 
-  it("creates a body-only note and reloads the list", async () => {
+  it("creates a body-only note even when the post-create list reload lags", async () => {
     mockUseSession.mockReturnValue(makeSession());
-    mockListMyNotes.mockResolvedValueOnce([]).mockResolvedValueOnce([
-      {
-        id: "note-1",
-        ownerId: "identity-1",
-        title: null,
-        message: "Body only",
-        createdAt: 1000,
-        updatedAt: 2000,
-        revision: 0,
-      },
-    ]);
+    mockListMyNotes.mockResolvedValue([]);
     mockGetNote.mockResolvedValue({
       id: "note-1",
       ownerId: "identity-1",
@@ -187,6 +177,7 @@ describe("NotesWorkspace", () => {
       expect(mockListMyNotes).toHaveBeenCalledTimes(2);
     });
     expect(screen.getByDisplayValue("Body only")).toBeTruthy();
+    expect(screen.getAllByText("Body only").length).toBeGreaterThan(0);
   });
 
   it("shows the empty notebook state for a valid contract with no notes", async () => {
@@ -295,6 +286,10 @@ describe("NotesWorkspace", () => {
     await waitFor(() => {
       expect(saveButton.hasAttribute("disabled")).toBe(true);
     });
+    await waitFor(() => {
+      expect(screen.getByText("Edited")).toBeTruthy();
+    });
+    expect(screen.queryByText("Original")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
     const confirmDialog = screen.getByRole("dialog");
@@ -906,7 +901,7 @@ describe("NotesWorkspace", () => {
       ).toBe("Edited offline");
     });
 
-    it("deletes a note via the bottom 'Delete note' button after confirming the modal", async () => {
+    it("removes a deleted note locally even when the post-delete list reload lags", async () => {
       mockUseSession.mockReturnValue(makeSession());
       mockListMyNotes.mockResolvedValue([noteFixture]);
       mockGetNote.mockResolvedValue(noteFixture);
@@ -937,6 +932,10 @@ describe("NotesWorkspace", () => {
           expect.objectContaining({ noteId: "note-mobile" }),
         );
       });
+      await waitFor(() => {
+        expect(screen.queryByText(/phone note/i)).toBeNull();
+      });
+      expect(screen.getByText(/no notes yet/i)).toBeTruthy();
     });
   });
 

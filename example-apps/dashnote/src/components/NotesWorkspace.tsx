@@ -173,6 +173,7 @@ export function NotesWorkspace({
   const rawNotesRef = useRef<NoteRecord[]>([]);
   const displayTokenRef = useRef(0);
   const decryptedPayloadCacheRef = useRef(createDecryptedNotePayloadCache());
+  const deletedNoteIdsRef = useRef(new Set<string>());
   useEffect(() => {
     rawNotesRef.current = rawNotes;
   }, [rawNotes]);
@@ -215,6 +216,7 @@ export function NotesWorkspace({
 
   useEffect(() => {
     decryptedPayloadCacheRef.current.clear();
+    deletedNoteIdsRef.current.clear();
   }, [identityId, contractId]);
 
   useEffect(() => {
@@ -293,6 +295,60 @@ export function NotesWorkspace({
     setError(null);
   }, []);
 
+  const setWorkspaceNotes = useCallback(
+    (nextNotes: NoteRecord[], persist = false) => {
+      rawNotesRef.current = nextNotes;
+      setRawNotes(nextNotes);
+      displayTokenRef.current += 1;
+      setNotes(
+        nextNotes.map((note) =>
+          cachedOrFallbackDisplayNote({
+            note,
+            contractId,
+            encryptionKeyMaterial: encryptionKeyMaterialRef.current,
+            decryptedPayloadCache: decryptedPayloadCacheRef.current,
+          }),
+        ),
+      );
+      if (persist && identityId && contractId) {
+        saveCachedNotes(identityId, contractId, NETWORK, nextNotes);
+      }
+    },
+    [contractId, identityId],
+  );
+
+  const mergeReloadedNotes = useCallback(
+    (previousNotes: NoteRecord[], fetchedNotes: NoteRecord[]) => {
+      const deletedIds = deletedNoteIdsRef.current;
+      const previousById = new Map(
+        previousNotes.map((note) => [note.id, note]),
+      );
+      const usedIds = new Set<string>();
+      const merged: NoteRecord[] = [];
+
+      for (const fetched of fetchedNotes) {
+        if (deletedIds.has(fetched.id)) continue;
+        const previous = previousById.get(fetched.id);
+        merged.push(
+          previous && previous.revision >= fetched.revision
+            ? previous
+            : fetched,
+        );
+        usedIds.add(fetched.id);
+      }
+
+      for (const previous of previousNotes) {
+        if (usedIds.has(previous.id) || deletedIds.has(previous.id)) continue;
+        merged.push(previous);
+      }
+
+      return merged.sort(
+        (left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0),
+      );
+    },
+    [],
+  );
+
   const reloadNotes = useCallback(
     async (preferredId?: SelectedNoteId) => {
       const sessionTornDown =
@@ -344,27 +400,16 @@ export function NotesWorkspace({
           return;
         }
         lastRevalidatedAt.current = Date.now();
-        const changed = !notesEqualByRevision(prevNotes, nextNotes);
-        setRawNotes(nextNotes);
-        displayTokenRef.current += 1;
-        setNotes(
-          nextNotes.map((note) =>
-            cachedOrFallbackDisplayNote({
-              note,
-              contractId,
-              encryptionKeyMaterial: encryptionKeyMaterialRef.current,
-              decryptedPayloadCache: decryptedPayloadCacheRef.current,
-            }),
-          ),
-        );
+        const mergedNotes = mergeReloadedNotes(prevNotes, nextNotes);
+        const changed = !notesEqualByRevision(prevNotes, mergedNotes);
+        setWorkspaceNotes(mergedNotes, changed);
         if (changed) {
-          saveCachedNotes(identityId, contractId, NETWORK, nextNotes);
           // Reconcile the currently selected note. The list query already
           // returned full bodies, so we don't need an extra getNote.
           const sel = selectedIdRef.current;
           if (typeof sel === "string" && sel !== "new") {
             const before = prevNotes.find((n) => n.id === sel) ?? null;
-            const after = nextNotes.find((n) => n.id === sel) ?? null;
+            const after = mergedNotes.find((n) => n.id === sel) ?? null;
             if (after && (!before || before.revision !== after.revision)) {
               const displayAfter = await resolveNoteForDisplay(after, {
                 network: NETWORK,
@@ -397,19 +442,19 @@ export function NotesWorkspace({
           if (preferredId === "new") return "new";
           if (
             typeof preferredId === "string" &&
-            nextNotes.some((note) => note.id === preferredId)
+            mergedNotes.some((note) => note.id === preferredId)
           ) {
             return preferredId;
           }
           if (
             typeof current === "string" &&
             current !== "new" &&
-            nextNotes.some((note) => note.id === current)
+            mergedNotes.some((note) => note.id === current)
           ) {
             return current;
           }
           if (current === "new") return current;
-          return isDesktop ? (nextNotes[0]?.id ?? null) : null;
+          return isDesktop ? (mergedNotes[0]?.id ?? null) : null;
         });
         setEditsReady(true);
       } catch (err) {
@@ -423,7 +468,16 @@ export function NotesWorkspace({
         }
       }
     },
-    [contractId, identityId, log, sdk, status, isDesktop],
+    [
+      contractId,
+      identityId,
+      log,
+      mergeReloadedNotes,
+      sdk,
+      setWorkspaceNotes,
+      status,
+      isDesktop,
+    ],
   );
 
   // Hydrate from cache synchronously when identity/contract changes, then kick
@@ -510,21 +564,7 @@ export function NotesWorkspace({
             idx === -1
               ? [note, ...prev]
               : prev.map((n, i) => (i === idx ? note : n));
-          setRawNotes(merged);
-          displayTokenRef.current += 1;
-          setNotes(
-            merged.map((mergedNote) =>
-              cachedOrFallbackDisplayNote({
-                note: mergedNote,
-                contractId,
-                encryptionKeyMaterial: encryptionKeyMaterialRef.current,
-                decryptedPayloadCache: decryptedPayloadCacheRef.current,
-              }),
-            ),
-          );
-          if (identityId && contractId) {
-            saveCachedNotes(identityId, contractId, NETWORK, merged);
-          }
+          setWorkspaceNotes(merged, true);
         }
         const nextTitle = editableNoteTitle(displayNote);
         const nextMessage = editableNoteMessage(displayNote);
@@ -551,7 +591,7 @@ export function NotesWorkspace({
         if (loadTokenRef.current === token) setDetailLoading(false);
       }
     },
-    [contractId, identityId, log, sdk],
+    [contractId, log, sdk, setWorkspaceNotes],
   );
 
   useEffect(() => {
@@ -733,6 +773,9 @@ export function NotesWorkspace({
         baselineMessageRef.current = submittedMessage;
         setBaselineTitle(submittedTitle);
         setBaselineMessage(submittedMessage);
+        selectedIdRef.current = noteId;
+        setSelectedId(noteId);
+        await loadNoteDetail(noteId, true);
         await reloadNotes(noteId);
       } else {
         const newRevision = await updateNote({
@@ -806,23 +849,7 @@ export function NotesWorkspace({
                 idx === -1
                   ? [latest, ...prev]
                   : prev.map((n, i) => (i === idx ? latest : n));
-              setRawNotes(merged);
-              displayTokenRef.current += 1;
-              setNotes(
-                merged.map((mergedNote) =>
-                  cachedOrFallbackDisplayNote({
-                    note: mergedNote,
-                    contractId,
-                    encryptionKeyMaterial:
-                      currentEncryptionKeyMaterial ??
-                      encryptionKeyMaterialRef.current,
-                    decryptedPayloadCache: decryptedPayloadCacheRef.current,
-                  }),
-                ),
-              );
-              if (identityId && contractId) {
-                saveCachedNotes(identityId, contractId, NETWORK, merged);
-              }
+              setWorkspaceNotes(merged, true);
             }
             setConflictWarning(STALE_EDIT_WARNING);
           }
@@ -864,6 +891,22 @@ export function NotesWorkspace({
         level: "success",
         detail: `id ${selectedId.slice(0, 8)}…`,
       });
+      deletedNoteIdsRef.current.add(selectedId);
+      const remainingNotes = rawNotesRef.current.filter(
+        (note) => note.id !== selectedId,
+      );
+      setWorkspaceNotes(remainingNotes, true);
+      const nextSelectedId = isDesktop ? (remainingNotes[0]?.id ?? null) : null;
+      selectedIdRef.current = nextSelectedId;
+      setSelectedId(nextSelectedId);
+      if (!nextSelectedId) {
+        setSelectedNote(null);
+        setSelectedRawNote(null);
+        setTitle("");
+        setMessage("");
+        setBaselineTitle("");
+        setBaselineMessage("");
+      }
       setDeleteRequested(false);
       await reloadNotes();
     } catch (err) {
