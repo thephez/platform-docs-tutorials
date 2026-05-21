@@ -15,6 +15,7 @@ const CONTENT_ALG = "AES-256-GCM";
 const KDF = "HKDF-SHA256";
 const KEY_SOURCE = "identity-encryption-key";
 const AES_GCM_IV_BYTES = 12;
+const AES_GCM_TAG_BYTES = 16;
 
 export type NoteEncryptionState =
   | "plaintext"
@@ -130,6 +131,47 @@ export function assertEncryptedMessageFits(message: string): void {
       `Encrypted note exceeds the ${FIELD_BYTE_LIMIT}-byte field limit (${bytes} B). Shorten the note and try again.`,
     );
   }
+}
+
+export function estimateEncryptedStoredBytes(
+  title: string,
+  message: string,
+  keyMaterial: Pick<DashEncryptionKeyMaterial, "keyId" | "keyVersion">,
+): number {
+  const plaintextBytes = byteLength(
+    JSON.stringify({ title: title.trim(), message }),
+  );
+  const ciphertextBytes = plaintextBytes + AES_GCM_TAG_BYTES;
+  const ivB64Bytes = base64UrlNoPadBytes(AES_GCM_IV_BYTES);
+  const ciphertextB64Bytes = base64UrlNoPadBytes(ciphertextBytes);
+  const skeletonBytes = byteLength(
+    JSON.stringify({
+      v: ENVELOPE_VERSION,
+      kind: ENCRYPTED_NOTE_KIND,
+      encryption: {
+        contentAlg: CONTENT_ALG,
+        kdf: KDF,
+        keySource: KEY_SOURCE,
+        keyId: keyMaterial.keyId,
+        keyVersion: keyMaterial.keyVersion,
+      },
+      encryptedPayload: { iv: "", ciphertext: "" },
+      shares: [],
+    }),
+  );
+  const envelopeJsonBytes = skeletonBytes + ivB64Bytes + ciphertextB64Bytes;
+  return (
+    byteLength(ENCRYPTED_NOTE_PREFIX) + base64UrlNoPadBytes(envelopeJsonBytes)
+  );
+}
+
+function base64UrlNoPadBytes(rawBytes: number): number {
+  // Matches the unpadded base64url encoder below: 3 raw bytes → 4 chars,
+  // with the trailing group emitting 2 chars for 1 leftover byte and 3 chars
+  // for 2 leftover bytes (no `=` padding).
+  const whole = Math.floor(rawBytes / 3) * 4;
+  const rem = rawBytes % 3;
+  return whole + (rem === 0 ? 0 : rem + 1);
 }
 
 export function createDecryptedNotePayloadCache(

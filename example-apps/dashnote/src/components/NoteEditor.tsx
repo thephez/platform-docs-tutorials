@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { NoteRecord } from "../dash/queries";
-import { FIELD_BYTE_LIMIT } from "../lib/fieldLimits";
+import { FIELD_BYTE_LIMIT, type FieldBudget } from "../lib/fieldLimits";
 import { formatRelativeTime, formatTimestamp } from "../lib/format";
 import { NoteJsonDrawer } from "./NoteJsonDrawer";
 import { OperationResultNotice } from "./OperationResultNotice";
@@ -27,8 +27,7 @@ interface NoteEditorProps {
   canEdit: boolean;
   canDelete: boolean;
   dirty: boolean;
-  messageBytes: number;
-  messageOversize: boolean;
+  budget: FieldBudget;
   contractReady: boolean;
   contractId: string | null;
   error: string | null;
@@ -56,8 +55,7 @@ export function NoteEditor({
   canEdit,
   canDelete,
   dirty,
-  messageBytes,
-  messageOversize,
+  budget,
   contractReady,
   contractId,
   error,
@@ -69,7 +67,7 @@ export function NoteEditor({
 }: NoteEditorProps) {
   const hasSelection = selectedId !== null;
   const isNew = selectedId === "new";
-  const oversize = messageOversize;
+  const oversize = budget.over;
   const lockedEncryptedNote = note?.encryptionState === "locked";
   const invalidEncryptedNote = note?.encryptionState === "invalid";
   const [jsonOpen, setJsonOpen] = useState(false);
@@ -350,9 +348,9 @@ export function NoteEditor({
                 rows={16}
                 className="w-full min-h-0 flex-1 border-0 bg-transparent px-0 py-1 text-[15px] leading-6 text-ink outline-none placeholder:text-ink-4 disabled:cursor-not-allowed disabled:text-ink-4 md:min-h-[340px] xl:min-h-0"
               />
-              {(messageBytes / FIELD_BYTE_LIMIT >= 0.75 || messageOversize) && (
+              {(budget.ratio >= 0.75 || budget.over) && (
                 <div className="mt-2 md:hidden">
-                  <FillBar bytes={messageBytes} limit={FIELD_BYTE_LIMIT} />
+                  <FillBar budget={budget} />
                 </div>
               )}
               {isReadOnly && (
@@ -434,11 +432,12 @@ export function NoteEditor({
           )}
           <div className="flex items-center gap-2 text-[11px] text-ink-4">
             <span>
-              {messageBytes.toLocaleString()} /{" "}
-              {FIELD_BYTE_LIMIT.toLocaleString()} B
+              {budget.over
+                ? `${(-budget.remaining).toLocaleString()} B over limit`
+                : `${budget.remaining.toLocaleString()} B remaining`}
             </span>
             <div className="w-20">
-              <FillBar bytes={messageBytes} limit={FIELD_BYTE_LIMIT} />
+              <FillBar budget={budget} />
             </div>
           </div>
         </div>
@@ -453,23 +452,22 @@ export function NoteEditor({
   );
 }
 
-function FillBar({ bytes, limit }: { bytes: number; limit: number }) {
-  const pct = Math.min(100, (bytes / limit) * 100);
-  const over = bytes > limit;
-  const near = !over && pct >= 90;
-  const fill = over
+function FillBar({ budget }: { budget: FieldBudget }) {
+  const pct = Math.min(100, budget.ratio * 100);
+  const near = !budget.over && budget.ratio >= 0.9;
+  const fill = budget.over
     ? "bg-[color:var(--color-danger)]"
     : near
       ? "bg-[color:var(--color-warning)]"
       : "bg-accent";
-  const tooltip = over
-    ? `${bytes} / ${limit} bytes — over limit`
-    : `${bytes} / ${limit} bytes`;
+  const tooltip = budget.over
+    ? `${(-budget.remaining).toLocaleString()} B over limit`
+    : `${budget.remaining.toLocaleString()} B remaining`;
   return (
     <div
       role="progressbar"
-      aria-valuenow={bytes}
-      aria-valuemax={limit}
+      aria-valuenow={budget.used}
+      aria-valuemax={FIELD_BYTE_LIMIT}
       aria-valuetext={tooltip}
       title={tooltip}
       className="h-[3px] w-full overflow-hidden rounded-full bg-surface-2"

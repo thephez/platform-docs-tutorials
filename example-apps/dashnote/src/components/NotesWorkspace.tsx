@@ -16,6 +16,7 @@ import { DeleteNoteModal } from "./DeleteNoteModal";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import {
   createDecryptedNotePayloadCache,
+  estimateEncryptedStoredBytes,
   isEncryptedNoteEnvelopeString,
   noteDisplayFallback,
   resolveCachedNoteForDisplay,
@@ -23,7 +24,7 @@ import {
   resolveNotesForDisplay,
   type DisplayNoteRecord,
 } from "../lib/encryptedNotes";
-import { byteLength, FIELD_BYTE_LIMIT } from "../lib/fieldLimits";
+import { FIELD_BYTE_LIMIT, byteLength, fieldBudget } from "../lib/fieldLimits";
 import { errorMessage, normalizeLogOptions, type Logger } from "../lib/logger";
 import {
   BACKGROUND_REFRESH_MS,
@@ -276,8 +277,11 @@ export function NotesWorkspace({
   );
   const canEditCurrent = canMutate && !selectedEncryptedReadOnly;
   const dirty = title !== baselineTitle || message !== baselineMessage;
-  const messageBytes = byteLength(message);
-  const messageOversize = messageBytes > FIELD_BYTE_LIMIT;
+  const messageBytes = encryptionKeyMaterial
+    ? estimateEncryptedStoredBytes(title, message, encryptionKeyMaterial)
+    : byteLength(message);
+  const budget = fieldBudget(messageBytes);
+  const messageOversize = budget.over;
 
   const hasMeaningfulContent = useMemo(
     () => Boolean(title.trim() || message.trim()),
@@ -712,7 +716,7 @@ export function NotesWorkspace({
     }
     if (messageOversize) {
       setError(
-        `Body exceeds the ${FIELD_BYTE_LIMIT}-byte field limit (${messageBytes} B).`,
+        `Note exceeds the ${FIELD_BYTE_LIMIT}-byte field limit by ${-budget.remaining} B.`,
       );
       return;
     }
@@ -985,8 +989,7 @@ export function NotesWorkspace({
               )}
               isReadOnly={isBrowsing}
               dirty={dirty}
-              messageBytes={messageBytes}
-              messageOversize={messageOversize}
+              budget={budget}
               contractReady={contractReady}
               contractId={contractId}
               error={error}

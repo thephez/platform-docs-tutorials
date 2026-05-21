@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { NoteEditor } from "../src/components/NoteEditor";
 import type { NoteRecord } from "../src/dash/queries";
+import { FIELD_BYTE_LIMIT, fieldBudget } from "../src/lib/fieldLimits";
 
 const NOW = Date.now();
 
@@ -40,8 +41,7 @@ function renderEditor(overrides: EditorOverrides = {}) {
     canEdit: false,
     canDelete: false,
     dirty: false,
-    messageBytes: 0,
-    messageOversize: false,
+    budget: fieldBudget(0),
     contractReady: true,
     contractId: "contract-1",
     error: null,
@@ -141,5 +141,27 @@ describe("NoteEditor read-only sign-in surface", () => {
     const bodyInput = screen.getByLabelText(/body/i) as HTMLTextAreaElement;
     expect(titleInput.disabled).toBe(true);
     expect(bodyInput.disabled).toBe(true);
+  });
+});
+
+describe("NoteEditor byte counter", () => {
+  it("renders 'X B remaining' on the desktop footer when under the limit", () => {
+    renderEditor({ canEdit: true, budget: fieldBudget(120) });
+    expect(
+      screen.getByText(
+        `${(FIELD_BYTE_LIMIT - 120).toLocaleString()} B remaining`,
+      ),
+    ).toBeTruthy();
+  });
+
+  it("renders 'X B over limit' and disables Save when over", () => {
+    renderEditor({
+      canEdit: true,
+      dirty: true,
+      budget: fieldBudget(FIELD_BYTE_LIMIT + 25),
+    });
+    expect(screen.getByText("25 B over limit")).toBeTruthy();
+    const save = screen.getByRole("button", { name: /^save$/i });
+    expect((save as HTMLButtonElement).disabled).toBe(true);
   });
 });

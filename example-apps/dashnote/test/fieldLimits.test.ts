@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
   FIELD_BYTE_LIMIT,
   byteLength,
+  fieldBudget,
   isOversize,
 } from "../src/lib/fieldLimits";
 
@@ -87,5 +88,41 @@ describe("isOversize", () => {
     expect(rockets.length).toBeLessThan(FIELD_BYTE_LIMIT);
     expect(byteLength(rockets)).toBe(5124);
     expect(isOversize(rockets)).toBe(true);
+  });
+});
+
+describe("fieldBudget", () => {
+  it("reports remaining bytes when under the limit", () => {
+    const b = fieldBudget(100);
+    expect(b.used).toBe(100);
+    expect(b.remaining).toBe(FIELD_BYTE_LIMIT - 100);
+    expect(b.over).toBe(false);
+    expect(b.ratio).toBeCloseTo(100 / FIELD_BYTE_LIMIT);
+  });
+
+  it("reports zero remaining at exactly the limit", () => {
+    const b = fieldBudget(FIELD_BYTE_LIMIT);
+    expect(b.remaining).toBe(0);
+    expect(b.over).toBe(false);
+    expect(b.ratio).toBe(1);
+  });
+
+  it("reports negative remaining when over the limit", () => {
+    const b = fieldBudget(FIELD_BYTE_LIMIT + 50);
+    expect(b.remaining).toBe(-50);
+    expect(b.over).toBe(true);
+    expect(b.ratio).toBeGreaterThan(1);
+  });
+
+  it("clamps ratio to 1.5 for the fill bar", () => {
+    const b = fieldBudget(FIELD_BYTE_LIMIT * 10);
+    expect(b.ratio).toBe(1.5);
+  });
+
+  it("clamps ratio to 0 for an empty note", () => {
+    const b = fieldBudget(0);
+    expect(b.ratio).toBe(0);
+    expect(b.remaining).toBe(FIELD_BYTE_LIMIT);
+    expect(b.over).toBe(false);
   });
 });
