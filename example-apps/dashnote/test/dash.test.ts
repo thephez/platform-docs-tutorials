@@ -1,24 +1,40 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockDocumentConstructor } = vi.hoisted(() => ({
+const { mockDocumentConstructor, mockDocumentState } = vi.hoisted(() => ({
   mockDocumentConstructor: vi.fn(),
+  mockDocumentState: {
+    id: null as string | null,
+    entropy: null as Uint8Array | number[] | null,
+  },
 }));
 
 vi.mock("@dashevo/evo-sdk", () => ({
   Document: function MockDocument(args: unknown) {
     mockDocumentConstructor(args);
-    return {
+    const document: {
+      args: unknown;
+      id?: string;
+      entropy?: Uint8Array | number[];
+      toJSON: () => { $id: string };
+    } = {
       args,
-      toJSON: () => ({ $id: "note-1" }),
+      toJSON: () => ({ $id: mockDocumentState.id ?? "note-1" }),
     };
+    if (mockDocumentState.id) document.id = mockDocumentState.id;
+    if (mockDocumentState.entropy) document.entropy = mockDocumentState.entropy;
+    return document;
   },
 }));
 
 import { createNote } from "../src/dash/createNote";
 import { deleteNote } from "../src/dash/deleteNote";
 import { updateNote } from "../src/dash/updateNote";
+import {
+  ENCRYPTED_NOTE_PREFIX,
+  ENCRYPTED_NOTE_TITLE,
+} from "../src/lib/encryptedNotes";
 
 function makeKeyManager() {
   return {
@@ -29,6 +45,18 @@ function makeKeyManager() {
     }),
   };
 }
+
+const keyMaterial = {
+  keyId: 4,
+  keyVersion: 1,
+  privateKeyBytes: new Uint8Array(32).fill(7),
+};
+
+beforeEach(() => {
+  mockDocumentConstructor.mockReset();
+  mockDocumentState.id = null;
+  mockDocumentState.entropy = null;
+});
 
 describe("createNote", () => {
   it("creates a note with a trimmed title", async () => {
@@ -83,11 +111,75 @@ describe("createNote", () => {
       ownerId: "identity-1",
     });
   });
+
+  it("fails closed for encrypted creation when document.id is unavailable before submit", async () => {
+    const sdk = {
+      documents: {
+        create: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await expect(
+      createNote({
+        sdk: sdk as never,
+        keyManager: makeKeyManager() as never,
+        contractId: "contract-1",
+        title: "Secret",
+        message: "Body",
+        encryption: {
+          network: "testnet",
+          keyMaterial,
+        },
+      }),
+    ).rejects.toThrow(/document\.id before submit/i);
+    expect(sdk.documents.create).not.toHaveBeenCalled();
+  });
+
+  it("submits only encrypted envelope fields when encryption is enabled", async () => {
+    mockDocumentState.id = "note-created";
+    mockDocumentState.entropy = new Uint8Array(32).fill(1);
+    const sdk = {
+      documents: {
+        create: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    const noteId = await createNote({
+      sdk: sdk as never,
+      keyManager: makeKeyManager() as never,
+      contractId: "contract-1",
+      title: "  Secret title  ",
+      message: "Secret body",
+      encryption: {
+        network: "testnet",
+        keyMaterial,
+      },
+    });
+
+    expect(noteId).toBe("note-created");
+    expect(mockDocumentConstructor).toHaveBeenCalledTimes(2);
+    const finalArgs = mockDocumentConstructor.mock.calls[1][0] as {
+      properties: { title: string; message: string };
+      id: string;
+      entropy: Uint8Array;
+    };
+    expect(finalArgs.id).toBe("note-created");
+    expect(finalArgs.properties.title).toBe(ENCRYPTED_NOTE_TITLE);
+    expect(finalArgs.properties.message).toMatch(
+      new RegExp(`^${ENCRYPTED_NOTE_PREFIX}`),
+    );
+    expect(finalArgs.properties.message).not.toContain("Secret title");
+    expect(finalArgs.properties.message).not.toContain("Secret body");
+    expect(sdk.documents.create).toHaveBeenCalledWith({
+      document: expect.objectContaining({ args: finalArgs }),
+      identityKey: "identity-key",
+      signer: "signer",
+    });
+  });
 });
 
 describe("updateNote", () => {
   it("fetches the current note and increments revision before replace", async () => {
-    mockDocumentConstructor.mockReset();
     const sdk = {
       documents: {
         get: vi.fn().mockResolvedValue({ revision: 4n }),
@@ -118,6 +210,47 @@ describe("updateNote", () => {
       ownerId: "identity-1",
       revision: 5n,
       id: "note-9",
+    });
+  });
+
+  it("replaces with only encrypted envelope fields when encryption is enabled", async () => {
+    const sdk = {
+      documents: {
+        get: vi.fn().mockResolvedValue({ revision: 4n }),
+        replace: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await updateNote({
+      sdk: sdk as never,
+      keyManager: makeKeyManager() as never,
+      contractId: "contract-1",
+      noteId: "note-9",
+      title: "Secret title",
+      message: "Secret body",
+      encryption: {
+        network: "testnet",
+        keyMaterial,
+      },
+    });
+
+    const finalArgs = mockDocumentConstructor.mock.calls[0][0] as {
+      properties: { title: string; message: string };
+      id: string;
+      revision: bigint;
+    };
+    expect(finalArgs.id).toBe("note-9");
+    expect(finalArgs.revision).toBe(5n);
+    expect(finalArgs.properties.title).toBe(ENCRYPTED_NOTE_TITLE);
+    expect(finalArgs.properties.message).toMatch(
+      new RegExp(`^${ENCRYPTED_NOTE_PREFIX}`),
+    );
+    expect(finalArgs.properties.message).not.toContain("Secret title");
+    expect(finalArgs.properties.message).not.toContain("Secret body");
+    expect(sdk.documents.replace).toHaveBeenCalledWith({
+      document: expect.objectContaining({ args: finalArgs }),
+      identityKey: "identity-key",
+      signer: "signer",
     });
   });
 });

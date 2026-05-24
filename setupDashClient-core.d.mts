@@ -101,6 +101,11 @@ export declare class IdentityKeyManager {
     identityKey: IdentityPublicKey | undefined;
     signer: IdentitySigner;
   }>;
+  getEncryptionKeyMaterial(): Promise<{
+    keyId: number;
+    keyVersion: number;
+    privateKeyBytes: Uint8Array;
+  } | null>;
 }
 
 export declare function createClient(

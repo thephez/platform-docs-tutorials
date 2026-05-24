@@ -7,6 +7,10 @@
  *   sdk.documents.replace({ document, identityKey, signer })
  */
 import type { Logger } from "../lib/logger";
+import {
+  buildReplaceNoteDocument,
+  type NoteWriteEncryptionOptions,
+} from "../lib/noteWriteDocuments";
 import { loadSdkModule } from "./sdkModule";
 import type { DashKeyManager, DashSdk } from "./types";
 
@@ -17,6 +21,7 @@ export interface UpdateNoteParams {
   noteId: string;
   title?: string;
   message: string;
+  encryption?: NoteWriteEncryptionOptions | null;
   log?: Logger;
 }
 
@@ -27,6 +32,7 @@ export async function updateNote({
   noteId,
   title,
   message,
+  encryption,
   log,
 }: UpdateNoteParams): Promise<bigint> {
   log?.(`Saving note ${noteId}…`);
@@ -38,17 +44,15 @@ export async function updateNote({
 
   const { Document } = await loadSdkModule();
   const revision = BigInt(existingDoc.revision ?? 0) + 1n;
-  const trimmedTitle = title?.trim();
-  const document = new Document({
-    properties: {
-      ...(trimmedTitle ? { title: trimmedTitle } : {}),
-      message,
-    },
-    documentTypeName: "note",
-    dataContractId: contractId,
+  const document = await buildReplaceNoteDocument({
+    Document,
+    contractId,
     ownerId: identity.id,
+    noteId,
     revision,
-    id: noteId,
+    title,
+    message,
+    encryption,
   });
 
   await sdk.documents.replace({
