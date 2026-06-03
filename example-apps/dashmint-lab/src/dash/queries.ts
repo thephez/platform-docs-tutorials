@@ -34,10 +34,14 @@ export interface Card {
   $price?: number | bigint;
 }
 
-// Returns null when the SDK's Document.toJSON() throws — currently happens
-// when any numeric field exceeds Number.MAX_SAFE_INTEGER (e.g. a $price of
-// 1e18 credits). See https://github.com/dashpay/platform/issues/3786.
-// One bad document must not poison the whole batch.
+// Fingerprint of the dashpay/platform#3786 failure: Document.toJSON()
+// throws when a numeric field exceeds Number.MAX_SAFE_INTEGER. We only
+// silence this specific shape — every other toJSON() failure propagates
+// so real bugs stay visible.
+const ISSUE_3786_FINGERPRINT = /can't be represented as a JavaScript number/i;
+
+// Returns null when toJSON() trips the known #3786 overflow. One bad
+// document must not poison the whole batch. Any other failure rethrows.
 function toCard(id: string | null, raw: DashCardQueryDocument): Card | null {
   let j: Record<string, unknown>;
   try {
@@ -47,9 +51,11 @@ function toCard(id: string | null, raw: DashCardQueryDocument): Card | null {
     // on access — logging the object alone shows __wbg_ptr. Pull the
     // readable fields explicitly.
     const err = e as { message?: string; name?: string };
+    const message = err?.message ?? "";
+    if (!ISSUE_3786_FINGERPRINT.test(message)) throw e;
     const skippedId = id ?? "<unknown>";
     console.warn(
-      `normalizeCards: skipping document ${skippedId} — ${err?.name ?? "Error"}: ${err?.message ?? String(e)}`,
+      `normalizeCards: skipping document ${skippedId} — ${err?.name ?? "Error"}: ${message}`,
     );
     return null;
   }

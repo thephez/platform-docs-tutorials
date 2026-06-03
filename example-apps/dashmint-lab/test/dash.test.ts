@@ -107,7 +107,7 @@ describe("dashmint helpers", () => {
     expect(cards.map((c) => c.id)).toEqual(["doc-good-1", "doc-good-2"]);
   });
 
-  it("normalizeCards skips throwing docs when results come in as a Map", () => {
+  it("normalizeCards skips #3786-shaped throwing docs in a Map result", () => {
     const cards = normalizeCards(
       new Map([
         [
@@ -120,7 +120,9 @@ describe("dashmint helpers", () => {
           "doc-bad",
           {
             toJSON() {
-              throw new Error("boom");
+              throw new Error(
+                "Failed to convert JSON to JsValue: Error: 1000000000000000000 can't be represented as a JavaScript number",
+              );
             },
           },
         ],
@@ -129,6 +131,20 @@ describe("dashmint helpers", () => {
 
     expect(cards).toHaveLength(1);
     expect(cards[0].id).toBe("doc-good");
+  });
+
+  // Counterpart to the #3786 skip path: any *other* toJSON() failure must
+  // propagate so real SDK/data bugs stay visible to the caller.
+  it("normalizeCards rethrows unrelated toJSON failures", () => {
+    expect(() =>
+      normalizeCards([
+        {
+          toJSON() {
+            throw new Error("something else broke");
+          },
+        },
+      ]),
+    ).toThrow("something else broke");
   });
 
   it("formatCredits and rarityOf expose learner-facing derived values", () => {
