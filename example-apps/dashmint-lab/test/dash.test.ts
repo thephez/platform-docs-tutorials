@@ -64,6 +64,73 @@ describe("dashmint helpers", () => {
     ]);
   });
 
+  // Regression: a single document whose toJSON() throws (e.g. evo-sdk
+  // 3.1.0-dev.6 and 4.0.0-beta.2 throw WasmDppError when a numeric field
+  // exceeds Number.MAX_SAFE_INTEGER, such as a $price of 1e18 credits)
+  // must not poison the whole batch. Skip the bad doc, return the rest.
+  // See https://github.com/dashpay/platform/issues/3786.
+  it("normalizeCards skips docs whose toJSON throws and returns the rest", () => {
+    const cards = normalizeCards([
+      {
+        toJSON() {
+          return {
+            $id: "doc-good-1",
+            $ownerId: "owner-1",
+            name: "Fire Dragon",
+            attack: 10,
+            defense: 8,
+            $price: 100n,
+          };
+        },
+      },
+      {
+        toJSON() {
+          throw new Error(
+            "Failed to convert JSON to JsValue: Error: 1000000000000000000 can't be represented as a JavaScript number",
+          );
+        },
+      },
+      {
+        toJSON() {
+          return {
+            $id: "doc-good-2",
+            $ownerId: "owner-2",
+            name: "Stone Golem",
+            attack: 4,
+            defense: 9,
+          };
+        },
+      },
+    ]);
+
+    expect(cards).toHaveLength(2);
+    expect(cards.map((c) => c.id)).toEqual(["doc-good-1", "doc-good-2"]);
+  });
+
+  it("normalizeCards skips throwing docs when results come in as a Map", () => {
+    const cards = normalizeCards(
+      new Map([
+        [
+          "doc-good",
+          {
+            $ownerId: "owner-1",
+          },
+        ],
+        [
+          "doc-bad",
+          {
+            toJSON() {
+              throw new Error("boom");
+            },
+          },
+        ],
+      ]),
+    );
+
+    expect(cards).toHaveLength(1);
+    expect(cards[0].id).toBe("doc-good");
+  });
+
   it("formatCredits and rarityOf expose learner-facing derived values", () => {
     expect(formatCredits(12345)).toBe("12,345");
     expect(formatCredits(99n)).toBe("99");

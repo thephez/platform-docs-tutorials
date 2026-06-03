@@ -34,9 +34,25 @@ export interface Card {
   $price?: number | bigint;
 }
 
-function toCard(id: string | null, raw: DashCardQueryDocument): Card {
-  const j: Record<string, unknown> =
-    typeof raw?.toJSON === "function" ? raw.toJSON() : raw;
+// Returns null when the SDK's Document.toJSON() throws — currently happens
+// when any numeric field exceeds Number.MAX_SAFE_INTEGER (e.g. a $price of
+// 1e18 credits). See https://github.com/dashpay/platform/issues/3786.
+// One bad document must not poison the whole batch.
+function toCard(id: string | null, raw: DashCardQueryDocument): Card | null {
+  let j: Record<string, unknown>;
+  try {
+    j = typeof raw?.toJSON === "function" ? raw.toJSON() : raw;
+  } catch (e) {
+    // WasmDppError exposes message/name as lazy getters that only resolve
+    // on access — logging the object alone shows __wbg_ptr. Pull the
+    // readable fields explicitly.
+    const err = e as { message?: string; name?: string };
+    const skippedId = id ?? "<unknown>";
+    console.warn(
+      `normalizeCards: skipping document ${skippedId} — ${err?.name ?? "Error"}: ${err?.message ?? String(e)}`,
+    );
+    return null;
+  }
   return {
     id: (id ?? (j.$id as string) ?? (j.id as string)) as string,
     ownerId: j.$ownerId as string,
@@ -50,11 +66,18 @@ function toCard(id: string | null, raw: DashCardQueryDocument): Card {
   };
 }
 
+function isCard(c: Card | null): c is Card {
+  return c !== null;
+}
+
 export function normalizeCards(results: DashCardQueryResults): Card[] {
-  if (Array.isArray(results)) return results.map((d) => toCard(null, d));
+  if (Array.isArray(results))
+    return results.map((d) => toCard(null, d)).filter(isCard);
   const entries =
     results instanceof Map ? Object.fromEntries(results) : results;
-  return Object.entries(entries).map(([id, d]) => toCard(id, d));
+  return Object.entries(entries)
+    .map(([id, d]) => toCard(id, d))
+    .filter(isCard);
 }
 
 interface BaseParams {
