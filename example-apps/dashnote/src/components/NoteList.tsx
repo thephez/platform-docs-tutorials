@@ -29,6 +29,7 @@ interface NoteListProps {
   canDeleteNotes?: boolean;
   isReadOnly?: boolean;
   onDeleteNote?: (note: NoteRecord) => void;
+  onOpenHistory?: (note: NoteRecord) => void;
   onOpenLogin?: () => void;
 }
 
@@ -45,6 +46,7 @@ export function NoteList({
   canDeleteNotes = false,
   isReadOnly = false,
   onDeleteNote,
+  onOpenHistory,
   onOpenLogin,
 }: NoteListProps) {
   const [search, setSearch] = useState("");
@@ -559,6 +561,19 @@ export function NoteList({
             >
               Info
             </button>
+            {onOpenHistory && (
+              <button
+                type="button"
+                onClick={() => {
+                  const note = actionsNote;
+                  setActionsNote(null);
+                  onOpenHistory(note);
+                }}
+                className="flex min-h-12 w-full items-center rounded-xl px-4 py-3 text-left text-[15px] font-medium text-ink hover:bg-surface-2"
+              >
+                History
+              </button>
+            )}
             {canDeleteNotes ? (
               <button
                 type="button"

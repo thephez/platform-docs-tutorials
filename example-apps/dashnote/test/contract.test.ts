@@ -56,6 +56,7 @@ afterEach(() => {
 describe("NOTE_SCHEMAS", () => {
   it("defines the note contract with timestamps, mutability, and owner/timestamp indices", () => {
     expect(NOTE_SCHEMAS.note.documentsMutable).toBe(true);
+    expect(NOTE_SCHEMAS.note.documentsKeepHistory).toBe(true);
     expect(NOTE_SCHEMAS.note.canBeDeleted).toBe(true);
     expect(NOTE_SCHEMAS.note.required).toEqual([
       "$createdAt",

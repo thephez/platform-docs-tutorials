@@ -18,6 +18,7 @@ vi.mock("@dashevo/evo-sdk", () => ({
 
 import { createNote } from "../src/dash/createNote";
 import { deleteNote } from "../src/dash/deleteNote";
+import { fetchNoteHistory } from "../src/dash/fetchNoteHistory";
 import { updateNote } from "../src/dash/updateNote";
 
 function makeKeyManager() {
@@ -147,5 +148,95 @@ describe("deleteNote", () => {
       identityKey: "identity-key",
       signer: "signer",
     });
+  });
+});
+
+describe("fetchNoteHistory", () => {
+  it("normalizes timestamp-keyed history entries newest-first", async () => {
+    const sdk = {
+      documents: {
+        history: vi.fn().mockResolvedValue(
+          new Map([
+            [
+              1_700_000_001_000n,
+              {
+                toJSON: () => ({
+                  $revision: "1",
+                  $updatedAt: 1_700_000_001_000,
+                  title: "First",
+                  message: "v1 body",
+                }),
+              },
+            ],
+            [
+              1_700_000_002_000n,
+              {
+                revision: 2n,
+                toJSON: () => ({
+                  $updatedAt: "1700000002000",
+                  message: "v2 body",
+                }),
+              },
+            ],
+          ]),
+        ),
+      },
+    };
+
+    const result = await fetchNoteHistory({
+      sdk: sdk as never,
+      contractId: "contract-1",
+      noteId: "note-1",
+    });
+
+    expect(sdk.documents.history).toHaveBeenCalledWith({
+      dataContractId: "contract-1",
+      documentTypeName: "note",
+      documentId: "note-1",
+      startAtMs: 0,
+      limit: 10,
+    });
+    expect(result.nextStartAtMs).toBe(1_700_000_002_000);
+    expect(result.entries).toEqual([
+      {
+        blockTimeMs: 1_700_000_002_000,
+        revision: 2,
+        title: null,
+        message: "v2 body",
+        updatedAt: 1_700_000_002_000,
+      },
+      {
+        blockTimeMs: 1_700_000_001_000,
+        revision: 1,
+        title: "First",
+        message: "v1 body",
+        updatedAt: 1_700_000_001_000,
+      },
+    ]);
+  });
+
+  it("uses startAtMs for the next timestamp page and clamps limit to the SDK max", async () => {
+    const sdk = {
+      documents: {
+        history: vi.fn().mockResolvedValue(new Map()),
+      },
+    };
+
+    const result = await fetchNoteHistory({
+      sdk: sdk as never,
+      contractId: "contract-1",
+      noteId: "note-1",
+      startAtMs: 1_700_000_002_000,
+      limit: 25,
+    });
+
+    expect(sdk.documents.history).toHaveBeenCalledWith({
+      dataContractId: "contract-1",
+      documentTypeName: "note",
+      documentId: "note-1",
+      startAtMs: 1_700_000_002_000,
+      limit: 10,
+    });
+    expect(result).toEqual({ entries: [], nextStartAtMs: null });
   });
 });

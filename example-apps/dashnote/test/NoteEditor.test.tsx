@@ -45,6 +45,7 @@ function renderEditor(overrides: EditorOverrides = {}) {
     deleting: false,
     canEdit: false,
     canDelete: false,
+    canViewHistory: false,
     dirty: false,
     messageBytes: 27,
     messageOversize: false,
@@ -54,6 +55,7 @@ function renderEditor(overrides: EditorOverrides = {}) {
     conflictWarning: null,
     onOpenLogin: vi.fn(),
     onOpenSettings: vi.fn(),
+    onOpenHistory: vi.fn(),
     isReadOnly: false,
     isDesktop: true,
     ...overrides,
@@ -142,6 +144,46 @@ describe("NoteEditor mobile refresh", () => {
     expect(screen.getByRole("button", { name: /^save$/i })).toBeTruthy();
   });
 
+  it("opens history from the desktop editor header", () => {
+    const onOpenHistory = vi.fn();
+    renderEditor({
+      isDesktop: true,
+      canViewHistory: true,
+      onOpenHistory,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^history$/i }));
+    expect(onOpenHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens history from the desktop revision chip when available", () => {
+    const onOpenHistory = vi.fn();
+    renderEditor({
+      isDesktop: true,
+      canViewHistory: true,
+      note: makeNote({ revision: 7 }),
+      onOpenHistory,
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /open history for revision 7/i }),
+    );
+    expect(onOpenHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the desktop revision chip passive when history is unavailable", () => {
+    renderEditor({
+      isDesktop: true,
+      canViewHistory: false,
+      note: makeNote({ revision: 7 }),
+    });
+
+    expect(screen.getByText(/revision 7/i)).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: /open history for revision 7/i }),
+    ).toBeNull();
+  });
+
   it("moves mobile delete into the note actions sheet", () => {
     const onDelete = vi.fn();
     renderEditor({
@@ -158,6 +200,21 @@ describe("NoteEditor mobile refresh", () => {
     fireEvent.click(within(sheet).getByRole("button", { name: /^delete$/i }));
 
     expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens history from the mobile note actions sheet", () => {
+    const onOpenHistory = vi.fn();
+    renderEditor({
+      isDesktop: false,
+      canViewHistory: true,
+      onOpenHistory,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /note actions/i }));
+    const sheet = screen.getByRole("dialog", { name: /note actions/i });
+    fireEvent.click(within(sheet).getByRole("button", { name: /^history$/i }));
+
+    expect(onOpenHistory).toHaveBeenCalledTimes(1);
   });
 
   it("hides mobile Delete when canDelete is false", () => {

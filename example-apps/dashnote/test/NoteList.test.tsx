@@ -185,6 +185,7 @@ describe("NoteList mobile refresh", () => {
       isDesktop: false,
       canDeleteNotes: true,
       onDeleteNote: vi.fn(),
+      onOpenHistory: vi.fn(),
     });
 
     fireEvent.click(
@@ -194,6 +195,9 @@ describe("NoteList mobile refresh", () => {
 
     expect(within(sheet).getByRole("button", { name: /^open$/i })).toBeTruthy();
     expect(within(sheet).getByRole("button", { name: /^info$/i })).toBeTruthy();
+    expect(
+      within(sheet).getByRole("button", { name: /^history$/i }),
+    ).toBeTruthy();
     expect(
       within(sheet).getByRole("button", { name: /^delete$/i }),
     ).toBeTruthy();
@@ -204,6 +208,7 @@ describe("NoteList mobile refresh", () => {
       isDesktop: false,
       canDeleteNotes: false,
       isReadOnly: true,
+      onOpenHistory: vi.fn(),
     });
 
     fireEvent.click(
@@ -214,8 +219,31 @@ describe("NoteList mobile refresh", () => {
     expect(within(sheet).getByRole("button", { name: /^open$/i })).toBeTruthy();
     expect(within(sheet).getByRole("button", { name: /^info$/i })).toBeTruthy();
     expect(
+      within(sheet).getByRole("button", { name: /^history$/i }),
+    ).toBeTruthy();
+    expect(
       within(sheet).getByRole("button", { name: /sign in to edit/i }),
     ).toBeTruthy();
+  });
+
+  it("history row action opens history without selecting the note", () => {
+    const onSelect = vi.fn();
+    const onOpenHistory = vi.fn();
+    const note = makeNote();
+    renderList([note], {
+      isDesktop: false,
+      onSelect,
+      onOpenHistory,
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /actions for meeting agenda/i }),
+    );
+    const sheet = screen.getByRole("dialog", { name: /note actions/i });
+    fireEvent.click(within(sheet).getByRole("button", { name: /^history$/i }));
+
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onOpenHistory).toHaveBeenCalledWith(note);
   });
 
   it("delete row action requests confirmation flow but does not select the note", () => {

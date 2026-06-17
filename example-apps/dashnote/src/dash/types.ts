@@ -50,6 +50,14 @@ export interface DashSdk {
       documentTypeName: string,
       documentId: string,
     ): Promise<DashDocumentLike | undefined>;
+    history(args: {
+      dataContractId: string;
+      documentTypeName: string;
+      documentId: string;
+      startAtMs?: number;
+      limit?: number;
+      offset?: number;
+    }): Promise<Map<bigint, DashDocumentLike>>;
     create(args: {
       document: unknown;
       identityKey: IdentityPublicKey | undefined;

@@ -13,6 +13,7 @@ export const NOTE_SCHEMAS = {
   note: {
     type: "object",
     documentsMutable: true,
+    documentsKeepHistory: true,
     canBeDeleted: true,
     properties: {
       title: {
@@ -48,7 +49,7 @@ const STORAGE_KEY = "dashnote.contractId";
  * in Settings or register their own.
  */
 export const DEFAULT_CONTRACT_ID =
-  "8d6heK6CoskLBi6Rs7cChRG9RuckcZqZst28BdviBe8y";
+  "5CBPiadGmx3Zsjc26g5onopcx7pdxHPbrRAUD2T2yAbC";
 
 export function loadStoredContractId(): string | null {
   try {
@@ -112,9 +113,8 @@ export async function registerContract({
   ).setConfig({
     canBeDeleted: false,
     readonly: false,
-    // Must stay false: keepsHistory: true triggers dashpay/platform#3165 —
-    // sdk.contracts.fetch() returns undefined, breaking sdk.documents.query
-    // with "Data contract not found".
+    // Contract schema history is separate from note document history
+    // Note revisions are enabled per document type via `documentsKeepHistory`
     keepsHistory: false,
     documentsKeepHistoryContractDefault: false,
     documentsMutableContractDefault: true,

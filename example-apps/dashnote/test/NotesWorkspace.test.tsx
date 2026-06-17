@@ -19,6 +19,7 @@ const {
   mockCreateNote,
   mockUpdateNote,
   mockDeleteNote,
+  mockFetchNoteHistory,
 } = vi.hoisted(() => ({
   mockUseSession: vi.fn(),
   mockListMyNotes: vi.fn(),
@@ -26,6 +27,7 @@ const {
   mockCreateNote: vi.fn(),
   mockUpdateNote: vi.fn(),
   mockDeleteNote: vi.fn(),
+  mockFetchNoteHistory: vi.fn(),
 }));
 
 vi.mock("../src/session/useSession", () => ({
@@ -47,6 +49,11 @@ vi.mock("../src/dash/updateNote", () => ({
 
 vi.mock("../src/dash/deleteNote", () => ({
   deleteNote: mockDeleteNote,
+}));
+
+vi.mock("../src/dash/fetchNoteHistory", () => ({
+  NOTE_HISTORY_PAGE_LIMIT: 10,
+  fetchNoteHistory: mockFetchNoteHistory,
 }));
 
 function makeSession(overrides: Record<string, unknown> = {}) {
@@ -88,6 +95,7 @@ beforeEach(() => {
   mockCreateNote.mockReset();
   mockUpdateNote.mockReset();
   mockDeleteNote.mockReset();
+  mockFetchNoteHistory.mockReset();
   vi.spyOn(window, "confirm").mockReturnValue(true);
   stubMatchMedia(true);
 });
@@ -305,6 +313,104 @@ describe("NotesWorkspace", () => {
         expect.objectContaining({ noteId: "note-2" }),
       );
     });
+  });
+
+  it("opens note history, loads newer pages, and restores a revision as unsaved edits", async () => {
+    mockUseSession.mockReturnValue(makeSession());
+    const note = {
+      id: "note-history",
+      ownerId: "identity-1",
+      title: "Current",
+      message: "Current body",
+      createdAt: 1000,
+      updatedAt: 12_000,
+      revision: 12,
+    };
+    mockListMyNotes.mockResolvedValue([note]);
+    mockGetNote.mockResolvedValue(note);
+    mockFetchNoteHistory
+      .mockResolvedValueOnce({
+        entries: Array.from({ length: 10 }, (_, index) => {
+          const revision = 10 - index;
+          return {
+            blockTimeMs: revision * 1000,
+            revision,
+            title: `Revision ${revision}`,
+            message: `body ${revision}`,
+            updatedAt: revision * 1000,
+          };
+        }),
+        nextStartAtMs: 10_000,
+      })
+      .mockResolvedValueOnce({
+        entries: [
+          {
+            blockTimeMs: 12_000,
+            revision: 12,
+            title: "Current",
+            message: "Current body",
+            updatedAt: 12_000,
+          },
+          {
+            blockTimeMs: 11_000,
+            revision: 11,
+            title: "Revision 11",
+            message: "body 11",
+            updatedAt: 11_000,
+          },
+        ],
+        nextStartAtMs: 12_000,
+      });
+
+    render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(
+        (screen.getByLabelText(/^body$/i) as HTMLTextAreaElement).value,
+      ).toBe("Current body");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^history$/i }));
+
+    await waitFor(() => {
+      expect(mockFetchNoteHistory).toHaveBeenCalledWith(
+        expect.objectContaining({
+          noteId: "note-history",
+          startAtMs: 0,
+        }),
+      );
+    });
+    expect(screen.getByRole("dialog", { name: /note history/i })).toBeTruthy();
+    expect(screen.getAllByText(/revision 10/i).length).toBeGreaterThan(0);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /load newer revisions/i }),
+    );
+    await waitFor(() => {
+      expect(mockFetchNoteHistory).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          noteId: "note-history",
+          startAtMs: 10_000,
+        }),
+      );
+    });
+    expect(screen.getAllByText(/revision 12/i).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /revision 9/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /restore this version/i }),
+    );
+
+    expect((screen.getByLabelText(/^title$/i) as HTMLInputElement).value).toBe(
+      "Revision 9",
+    );
+    expect(
+      (screen.getByLabelText(/^body$/i) as HTMLTextAreaElement).value,
+    ).toBe("body 9");
+    expect(
+      (screen.getByRole("button", { name: /^save$/i }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
   });
 
   it("merges fresh getNote data into the list and cache when the chain revision is newer than the cached list", async () => {
@@ -791,6 +897,63 @@ describe("NotesWorkspace", () => {
           expect.objectContaining({ noteId: "note-mobile" }),
         );
       });
+    });
+
+    it("opens history from list actions and restores into the editor", async () => {
+      mockUseSession.mockReturnValue(makeSession());
+      mockListMyNotes.mockResolvedValue([noteFixture]);
+      mockFetchNoteHistory.mockResolvedValue({
+        entries: [
+          {
+            blockTimeMs: 1_000,
+            revision: 1,
+            title: "Earlier title",
+            message: "Earlier body",
+            updatedAt: 1_000,
+          },
+        ],
+        nextStartAtMs: 1_000,
+      });
+
+      render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/phone note/i)).toBeTruthy();
+      });
+
+      fireEvent.click(
+        screen.getByRole("button", { name: /actions for phone note/i }),
+      );
+      const sheet = screen.getByRole("dialog", { name: /note actions/i });
+      fireEvent.click(
+        within(sheet).getByRole("button", { name: /^history$/i }),
+      );
+
+      await waitFor(() => {
+        expect(mockFetchNoteHistory).toHaveBeenCalledWith(
+          expect.objectContaining({
+            noteId: "note-mobile",
+            startAtMs: 0,
+          }),
+        );
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: /revision 1/i }));
+      fireEvent.click(
+        screen.getByRole("button", { name: /restore this version/i }),
+      );
+
+      expect(
+        (screen.getByLabelText(/^title$/i) as HTMLInputElement).value,
+      ).toBe("Earlier title");
+      expect(
+        (screen.getByLabelText(/^body$/i) as HTMLTextAreaElement).value,
+      ).toBe("Earlier body");
+      expect(
+        (screen.getByRole("button", { name: /^save$/i }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
+      expect(mockGetNote).not.toHaveBeenCalled();
     });
   });
 

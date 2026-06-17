@@ -9,6 +9,11 @@ import {
 
 import { createNote } from "../dash/createNote";
 import { deleteNote } from "../dash/deleteNote";
+import {
+  fetchNoteHistory,
+  NOTE_HISTORY_PAGE_LIMIT,
+  type NoteHistoryEntry,
+} from "../dash/fetchNoteHistory";
 import { getNote, listMyNotes, type NoteRecord } from "../dash/queries";
 import { updateNote } from "../dash/updateNote";
 import { DeleteNoteModal } from "./DeleteNoteModal";
@@ -24,6 +29,7 @@ import {
 } from "../lib/notesCache";
 import { useSession } from "../session/useSession";
 import { NoteEditor } from "./NoteEditor";
+import { NoteHistoryPanel } from "./NoteHistoryPanel";
 import { NoteList } from "./NoteList";
 
 const NETWORK = "testnet" as const;
@@ -32,6 +38,10 @@ const STALE_EDIT_WARNING =
 
 type SelectedNoteId = string | "new" | null;
 type DeleteTarget = { id: string; title: string };
+type PendingHistoryRestore = {
+  note: NoteRecord;
+  entry: NoteHistoryEntry;
+};
 
 // Wrap the session logger so `info` rows from src/dash/* helpers (which only
 // pass a string) pick up the activity-panel `detail` for the operation. The
@@ -41,6 +51,18 @@ function withDetail(log: Logger, detail: string): Logger {
     const opts = normalizeLogOptions(levelOrOptions);
     log(message, { ...opts, detail: opts.detail ?? detail });
   };
+}
+
+function mergeHistoryEntries(
+  existing: NoteHistoryEntry[],
+  incoming: NoteHistoryEntry[],
+): NoteHistoryEntry[] {
+  const byBlockTime = new Map<number, NoteHistoryEntry>();
+  for (const entry of existing) byBlockTime.set(entry.blockTimeMs, entry);
+  for (const entry of incoming) byBlockTime.set(entry.blockTimeMs, entry);
+  return Array.from(byBlockTime.values()).sort(
+    (left, right) => right.blockTimeMs - left.blockTimeMs,
+  );
 }
 
 export function NotesWorkspace({
@@ -89,8 +111,17 @@ export function NotesWorkspace({
   const [revalidating, setRevalidating] = useState(false);
   const [editsReady, setEditsReady] = useState(false);
   const [conflictWarning, setConflictWarning] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyEntries, setHistoryEntries] = useState<NoteHistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyStartAtMs, setHistoryStartAtMs] = useState<number | null>(null);
+  const [historyExhausted, setHistoryExhausted] = useState(false);
+  const [historyNote, setHistoryNote] = useState<NoteRecord | null>(null);
   const lastRevalidatedAt = useRef(0);
   const inFlightWriteRef = useRef(false);
+  const historyLoadTokenRef = useRef(0);
   // Monotonic token so a late listMyNotes() response from a previous
   // identity/contract/session can't clobber state for the current one.
   const reloadTokenRef = useRef(0);
@@ -103,6 +134,7 @@ export function NotesWorkspace({
   const baselineMessageRef = useRef("");
   const selectedIdRef = useRef<SelectedNoteId>(null);
   const notesRef = useRef<NoteRecord[]>([]);
+  const pendingHistoryRestoreRef = useRef<PendingHistoryRestore | null>(null);
   useEffect(() => {
     notesRef.current = notes;
   }, [notes]);
@@ -132,6 +164,24 @@ export function NotesWorkspace({
   const dirty = title !== baselineTitle || message !== baselineMessage;
   const messageBytes = byteLength(message);
   const messageOversize = messageBytes > FIELD_BYTE_LIMIT;
+  const newestLoadedHistoryRevision = useMemo(
+    () =>
+      historyEntries.reduce(
+        (maxRevision, entry) => Math.max(maxRevision, entry.revision),
+        0,
+      ),
+    [historyEntries],
+  );
+  const historyHasMore = Boolean(
+    historyNote &&
+    historyEntries.length > 0 &&
+    historyStartAtMs !== null &&
+    !historyExhausted &&
+    newestLoadedHistoryRevision < historyNote.revision,
+  );
+  const canViewHistory = Boolean(
+    canRead && sdk && contractId && selectedNote && selectedId !== "new",
+  );
 
   const hasMeaningfulContent = useMemo(
     () => Boolean(title.trim() || message.trim()),
@@ -139,6 +189,14 @@ export function NotesWorkspace({
   );
 
   const resetDraft = useCallback(() => {
+    historyLoadTokenRef.current += 1;
+    setHistoryOpen(false);
+    setHistoryEntries([]);
+    setHistoryLoading(false);
+    setHistoryLoadingMore(false);
+    setHistoryError(null);
+    setHistoryStartAtMs(null);
+    setHistoryExhausted(false);
     setSelectedId("new");
     setSelectedNote(null);
     setTitle("");
@@ -365,6 +423,19 @@ export function NotesWorkspace({
     }
     if (!selectedId || !sdk || !contractId) {
       setSelectedNote(null);
+      return;
+    }
+    const pendingRestore = pendingHistoryRestoreRef.current;
+    if (pendingRestore?.note.id === selectedId) {
+      pendingHistoryRestoreRef.current = null;
+      const nextTitle = pendingRestore.entry.title ?? "";
+      const nextMessage = pendingRestore.entry.message;
+      setSelectedNote(pendingRestore.note);
+      setBaselineTitle(pendingRestore.note.title ?? "");
+      setBaselineMessage(pendingRestore.note.message ?? "");
+      setTitle(nextTitle);
+      setMessage(nextMessage);
+      setConflictWarning(null);
       return;
     }
     setConflictWarning(null);
@@ -637,6 +708,83 @@ export function NotesWorkspace({
     }
   }
 
+  async function loadHistoryPage(reset: boolean, targetNote?: NoteRecord) {
+    const note = targetNote ?? historyNote;
+    if (!sdk || !contractId || !note) return;
+    const noteId = note.id;
+    const startAtMs = reset ? 0 : historyStartAtMs;
+    if (!reset && startAtMs === null) return;
+
+    const token = ++historyLoadTokenRef.current;
+    if (reset) {
+      setHistoryEntries([]);
+      setHistoryStartAtMs(null);
+      setHistoryExhausted(false);
+      setHistoryLoading(true);
+    } else {
+      setHistoryLoadingMore(true);
+    }
+    setHistoryError(null);
+    setHistoryNote(note);
+
+    try {
+      const result = await fetchNoteHistory({
+        sdk,
+        contractId,
+        noteId,
+        startAtMs: startAtMs ?? 0,
+        log: withDetail(log, "documents.history"),
+      });
+      if (historyLoadTokenRef.current !== token) return;
+
+      setHistoryEntries((current) =>
+        reset
+          ? mergeHistoryEntries([], result.entries)
+          : mergeHistoryEntries(current, result.entries),
+      );
+      setHistoryStartAtMs(result.nextStartAtMs);
+      setHistoryExhausted(
+        result.entries.length < NOTE_HISTORY_PAGE_LIMIT ||
+          result.nextStartAtMs === null,
+      );
+    } catch (err) {
+      if (historyLoadTokenRef.current === token) {
+        setHistoryError(errorMessage(err));
+      }
+    } finally {
+      if (historyLoadTokenRef.current === token) {
+        setHistoryLoading(false);
+        setHistoryLoadingMore(false);
+      }
+    }
+  }
+
+  function openHistory() {
+    if (!canViewHistory || !selectedNote) return;
+    setHistoryOpen(true);
+    void loadHistoryPage(true, selectedNote);
+  }
+
+  function openHistoryForNote(note: NoteRecord) {
+    if (!canRead || !sdk || !contractId) return;
+    setHistoryOpen(true);
+    void loadHistoryPage(true, note);
+  }
+
+  function restoreHistoryEntry(entry: NoteHistoryEntry) {
+    if (historyNote && selectedIdRef.current !== historyNote.id) {
+      pendingHistoryRestoreRef.current = { note: historyNote, entry };
+      setSelectedId(historyNote.id);
+      setHistoryOpen(false);
+      return;
+    }
+    setTitle(entry.title ?? "");
+    setMessage(entry.message);
+    setConflictWarning(null);
+    setError(null);
+    setHistoryOpen(false);
+  }
+
   return (
     <div className="space-y-5 max-md:flex max-md:min-h-0 max-md:flex-1 max-md:flex-col max-md:space-y-2">
       {!canRead ? (
@@ -683,6 +831,7 @@ export function NotesWorkspace({
               canDeleteNotes={canMutate}
               isReadOnly={isBrowsing}
               onDeleteNote={requestDeleteNote}
+              onOpenHistory={openHistoryForNote}
               onOpenLogin={onOpenLogin}
             />
           </div>
@@ -707,6 +856,7 @@ export function NotesWorkspace({
               canDelete={Boolean(
                 canMutate && selectedId && selectedId !== "new",
               )}
+              canViewHistory={canViewHistory}
               isReadOnly={isBrowsing}
               dirty={dirty}
               messageBytes={messageBytes}
@@ -717,6 +867,7 @@ export function NotesWorkspace({
               conflictWarning={conflictWarning}
               onOpenLogin={onOpenLogin}
               onOpenSettings={onOpenSettings}
+              onOpenHistory={openHistory}
             />
           </div>
         </div>
@@ -730,6 +881,19 @@ export function NotesWorkspace({
           setDeleteTarget(null);
         }}
         onConfirm={() => void confirmDelete()}
+      />
+      <NoteHistoryPanel
+        open={historyOpen}
+        entries={historyEntries}
+        loading={historyLoading}
+        loadingMore={historyLoadingMore}
+        error={historyError}
+        hasMore={historyHasMore}
+        canRestore={canMutate}
+        onClose={() => setHistoryOpen(false)}
+        onRetry={() => void loadHistoryPage(true)}
+        onLoadMore={() => void loadHistoryPage(false)}
+        onRestore={restoreHistoryEntry}
       />
     </div>
   );

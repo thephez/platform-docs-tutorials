@@ -74,7 +74,8 @@ Adjacent invariants that fall out of the same design:
 ## Gotchas
 
 - Update flow **must** fetch the document first to get the current revision; submitting a replace with the wrong `revision` will fail the state transition. The pattern is `BigInt(existing.revision ?? 0) + 1n`.
-- `keepsHistory` on the contract is forced to `false`. `keepsHistory: true` triggers [dashpay/platform#3165](https://github.com/dashpay/platform/issues/3165) — `sdk.contracts.fetch()` returns undefined and breaks `sdk.documents.query` with "Data contract not found". v1 of dashnote shows revision metadata only — older note bodies are not reconstructable from the network.
+- Note body history is controlled by document-type `documentsKeepHistory`, not contract-level `keepsHistory`. Dashnote keeps `keepsHistory: false` for contract schema history, sets `documentsKeepHistory: true` on the `note` document type, and uses [src/dash/fetchNoteHistory.ts](src/dash/fetchNoteHistory.ts) for `sdk.documents.history()`.
+- `sdk.documents.history()` returns `Map<bigint, Document>` keyed by block timestamp (`blockTimeMs`), not revision. The query is timestamp-ascending and capped at 10 entries per request, so history pagination uses the newest returned map key as the next exclusive `startAtMs` cursor.
 - Read-only mode (`session.status === "readonly"`) sets `keyManager` to `null`. Any write path (`createNote`, `updateNote`, `deleteNote`, `registerContract`) must guard for an authenticated session.
 - The notes cache in [src/lib/notesCache.ts](src/lib/notesCache.ts) is keyed by `identityId + contractId + network`. Switching identity, contract, or network invalidates the cache. Schema is versioned (`SCHEMA_VERSION = 1`); bumping it discards prior cached payloads.
 - Background revalidation runs every `BACKGROUND_REFRESH_MS` (30s); refocus revalidation is throttled to `FOCUS_REFRESH_MIN_MS` (10s). Both compare via `notesEqualByRevision` so identical results don't trigger re-renders.

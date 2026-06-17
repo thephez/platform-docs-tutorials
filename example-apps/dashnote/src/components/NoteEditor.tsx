@@ -22,6 +22,7 @@ interface NoteEditorProps {
   deleting: boolean;
   canEdit: boolean;
   canDelete: boolean;
+  canViewHistory: boolean;
   dirty: boolean;
   messageBytes: number;
   messageOversize: boolean;
@@ -31,6 +32,7 @@ interface NoteEditorProps {
   conflictWarning?: string | null;
   onOpenLogin: () => void;
   onOpenSettings: () => void;
+  onOpenHistory: () => void;
   isReadOnly?: boolean;
   isDesktop: boolean;
 }
@@ -50,6 +52,7 @@ export function NoteEditor({
   deleting,
   canEdit,
   canDelete,
+  canViewHistory,
   dirty,
   messageBytes,
   messageOversize,
@@ -59,6 +62,7 @@ export function NoteEditor({
   conflictWarning,
   onOpenLogin,
   onOpenSettings,
+  onOpenHistory,
   isReadOnly = false,
   isDesktop,
 }: NoteEditorProps) {
@@ -144,27 +148,29 @@ export function NoteEditor({
               </div>
             ) : note ? (
               <>
-                <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-[color:color-mix(in_oklab,var(--color-accent)_14%,transparent)] px-2.5 py-1 font-mono text-[11px] font-semibold text-accent max-lg:hidden">
-                  <svg
-                    width="11"
-                    height="11"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden
+                {canViewHistory ? (
+                  <button
+                    type="button"
+                    onClick={onOpenHistory}
+                    aria-label={`Open history for revision ${note.revision}`}
+                    className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-[color:color-mix(in_oklab,var(--color-accent)_14%,transparent)] px-2.5 py-1 font-mono text-[11px] font-semibold text-accent transition hover:bg-[color:color-mix(in_oklab,var(--color-accent)_20%,transparent)]"
                   >
-                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                  </svg>
-                  Revision {note.revision}
-                </span>
+                    <RevisionIcon />
+                    Revision {note.revision}
+                    <span aria-hidden className="text-[9px] leading-none">
+                      ▾
+                    </span>
+                  </button>
+                ) : (
+                  <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-[color:color-mix(in_oklab,var(--color-accent)_14%,transparent)] px-2.5 py-1 font-mono text-[11px] font-semibold text-accent">
+                    <RevisionIcon />
+                    Revision {note.revision}
+                  </span>
+                )}
                 {note.updatedAt && (
                   <span
                     title={formatTimestamp(note.updatedAt)}
-                    className="min-w-0 truncate text-[12px] text-ink-4 max-lg:hidden"
+                    className="min-w-0 truncate text-[12px] text-ink-4"
                   >
                     Updated {formatRelativeTime(note.updatedAt)}
                   </span>
@@ -182,11 +188,36 @@ export function NoteEditor({
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
+          {isDesktop && note && canViewHistory && (
+            <button
+              type="button"
+              onClick={onOpenHistory}
+              title="History"
+              className="inline-flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-[11.5px] font-medium text-ink-3 hover:border-line-2 hover:text-ink max-lg:w-7 max-lg:px-0"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M3 12a9 9 0 1 0 3-6.7" />
+                <path d="M3 3v6h6" />
+                <path d="M12 7v5l3 2" />
+              </svg>
+              <span className="max-lg:sr-only">History</span>
+            </button>
+          )}
           {isDesktop && note && (
             <button
               type="button"
               onClick={() => setJsonOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-[11.5px] font-medium text-ink-3 hover:border-line-2 hover:text-ink max-lg:hidden"
+              className="inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1.5 text-[11.5px] font-medium text-ink-3 hover:border-line-2 hover:text-ink max-xl:hidden"
             >
               <svg
                 width="12"
@@ -451,6 +482,19 @@ export function NoteEditor({
         {note && (
           <button
             type="button"
+            disabled={!canViewHistory}
+            onClick={() => {
+              setMobileActionsOpen(false);
+              onOpenHistory();
+            }}
+            className="flex min-h-12 w-full items-center rounded-xl px-4 py-3 text-left text-[15px] font-medium text-ink hover:bg-surface-2 disabled:cursor-not-allowed disabled:text-ink-4"
+          >
+            History
+          </button>
+        )}
+        {note && (
+          <button
+            type="button"
             aria-label="Info"
             onClick={() => {
               setMobileActionsOpen(false);
@@ -532,6 +576,25 @@ export function NoteEditor({
         )}
       </MobileActionSheet>
     </section>
+  );
+}
+
+function RevisionIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </svg>
   );
 }
 
