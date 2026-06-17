@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -358,6 +359,13 @@ describe("NotesWorkspace", () => {
             message: "body 11",
             updatedAt: 11_000,
           },
+          {
+            blockTimeMs: 10_000,
+            revision: 10,
+            title: "Revision 10 overlap",
+            message: "overlap duplicate body",
+            updatedAt: 10_000,
+          },
         ],
         nextStartAtMs: 12_000,
       });
@@ -395,6 +403,12 @@ describe("NotesWorkspace", () => {
       );
     });
     expect(screen.getAllByText(/revision 12/i).length).toBeGreaterThan(0);
+    expect(screen.getByText("Revision 10 overlap")).toBeTruthy();
+    expect(screen.getByText("overlap duplicate body")).toBeTruthy();
+    expect(screen.queryByText(/^body 10$/i)).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /load newer revisions/i }),
+    ).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /revision 9/i }));
     fireEvent.click(
@@ -411,6 +425,176 @@ describe("NotesWorkspace", () => {
       (screen.getByRole("button", { name: /^save$/i }) as HTMLButtonElement)
         .disabled,
     ).toBe(false);
+  });
+
+  it("ignores stale history responses after opening another note's history", async () => {
+    mockUseSession.mockReturnValue(makeSession());
+    const noteA = {
+      id: "note-a",
+      ownerId: "identity-1",
+      title: "Note A",
+      message: "Current A",
+      createdAt: 1000,
+      updatedAt: 2000,
+      revision: 2,
+    };
+    const noteB = {
+      id: "note-b",
+      ownerId: "identity-1",
+      title: "Note B",
+      message: "Current B",
+      createdAt: 1000,
+      updatedAt: 3000,
+      revision: 2,
+    };
+    let resolveHistoryA:
+      | ((value: { entries: unknown[]; nextStartAtMs: number | null }) => void)
+      | null = null;
+    let resolveHistoryB:
+      | ((value: { entries: unknown[]; nextStartAtMs: number | null }) => void)
+      | null = null;
+
+    mockListMyNotes.mockResolvedValue([noteA, noteB]);
+    mockGetNote.mockImplementation(({ noteId }: { noteId: string }) =>
+      Promise.resolve(noteId === "note-b" ? noteB : noteA),
+    );
+    mockFetchNoteHistory.mockImplementation(
+      ({ noteId }: { noteId: string }) =>
+        new Promise((resolve) => {
+          if (noteId === "note-a") {
+            resolveHistoryA = resolve;
+          } else {
+            resolveHistoryB = resolve;
+          }
+        }),
+    );
+
+    render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(
+        (screen.getByLabelText(/^body$/i) as HTMLTextAreaElement).value,
+      ).toBe("Current A");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^history$/i }));
+    await waitFor(() => {
+      expect(mockFetchNoteHistory).toHaveBeenCalledWith(
+        expect.objectContaining({ noteId: "note-a" }),
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /close history/i }));
+    fireEvent.click(screen.getByText("Note B"));
+    await waitFor(() => {
+      expect(
+        (screen.getByLabelText(/^body$/i) as HTMLTextAreaElement).value,
+      ).toBe("Current B");
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^history$/i }));
+    await waitFor(() => {
+      expect(mockFetchNoteHistory).toHaveBeenLastCalledWith(
+        expect.objectContaining({ noteId: "note-b" }),
+      );
+    });
+
+    await act(async () => {
+      resolveHistoryB?.({
+        entries: [
+          {
+            blockTimeMs: 3_000,
+            revision: 2,
+            title: "History B",
+            message: "body from note B",
+            updatedAt: 3_000,
+          },
+        ],
+        nextStartAtMs: 3_000,
+      });
+    });
+    expect(await screen.findByText("History B")).toBeTruthy();
+
+    await act(async () => {
+      resolveHistoryA?.({
+        entries: [
+          {
+            blockTimeMs: 2_000,
+            revision: 2,
+            title: "Stale History A",
+            message: "body from stale note A",
+            updatedAt: 2_000,
+          },
+        ],
+        nextStartAtMs: 2_000,
+      });
+    });
+
+    expect(screen.getByText("History B")).toBeTruthy();
+    expect(screen.queryByText("Stale History A")).toBeNull();
+    expect(screen.queryByText("body from stale note A")).toBeNull();
+  });
+
+  it("cancels a pending history request when starting a new note", async () => {
+    mockUseSession.mockReturnValue(makeSession());
+    const note = {
+      id: "note-pending",
+      ownerId: "identity-1",
+      title: "Pending note",
+      message: "Pending current body",
+      createdAt: 1000,
+      updatedAt: 2000,
+      revision: 2,
+    };
+    let resolveHistory:
+      | ((value: { entries: unknown[]; nextStartAtMs: number | null }) => void)
+      | null = null;
+
+    mockListMyNotes.mockResolvedValue([note]);
+    mockGetNote.mockResolvedValue(note);
+    mockFetchNoteHistory.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveHistory = resolve;
+        }),
+    );
+
+    render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(
+        (screen.getByLabelText(/^body$/i) as HTMLTextAreaElement).value,
+      ).toBe("Pending current body");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^history$/i }));
+    await waitFor(() => {
+      expect(mockFetchNoteHistory).toHaveBeenCalledWith(
+        expect.objectContaining({ noteId: "note-pending" }),
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^new note$/i }));
+    expect(screen.queryByRole("dialog", { name: /note history/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^history$/i })).toBeNull();
+
+    await act(async () => {
+      resolveHistory?.({
+        entries: [
+          {
+            blockTimeMs: 2_000,
+            revision: 2,
+            title: "Cancelled history",
+            message: "should not render",
+            updatedAt: 2_000,
+          },
+        ],
+        nextStartAtMs: 2_000,
+      });
+    });
+
+    expect(screen.queryByText("Cancelled history")).toBeNull();
+    expect(screen.queryByText("should not render")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^history$/i })).toBeNull();
   });
 
   it("merges fresh getNote data into the list and cache when the chain revision is newer than the cached list", async () => {

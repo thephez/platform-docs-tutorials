@@ -77,9 +77,10 @@ describe("NoteHistoryPanel", () => {
     const onRestore = vi.fn();
     renderPanel({ onRestore });
 
+    const collapsedBodyCount = screen.getAllByText("old body").length;
     fireEvent.click(screen.getByRole("button", { name: /revision 1/i }));
 
-    expect(screen.getAllByText("old body").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("old body").length).toBe(collapsedBodyCount + 1);
     fireEvent.click(
       screen.getByRole("button", { name: /restore this version/i }),
     );

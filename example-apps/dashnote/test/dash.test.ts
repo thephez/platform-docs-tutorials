@@ -239,4 +239,75 @@ describe("fetchNoteHistory", () => {
     });
     expect(result).toEqual({ entries: [], nextStartAtMs: null });
   });
+
+  it("normalizes defensive history fallbacks", async () => {
+    const sdk = {
+      documents: {
+        history: vi.fn().mockResolvedValue(
+          new Map([
+            [
+              1_700_000_003_000n,
+              {
+                $updatedAt: "not-a-number",
+                title: "Plain raw object",
+                message: "plain body",
+              },
+            ],
+            [
+              1_700_000_002_000n,
+              {
+                toJSON: () => ({
+                  $revision: "",
+                  $updatedAt: "still-not-a-number",
+                  title: "Missing revision",
+                  message: "missing revision body",
+                }),
+              },
+            ],
+            [
+              1_700_000_001_000n,
+              {
+                toJSON: () => ({
+                  $revision: 1,
+                  $updatedAt: 1_700_000_001_000,
+                  title: "Valid revision",
+                  message: "valid body",
+                }),
+              },
+            ],
+          ]),
+        ),
+      },
+    };
+
+    const result = await fetchNoteHistory({
+      sdk: sdk as never,
+      contractId: "contract-1",
+      noteId: "note-1",
+    });
+
+    expect(result.entries).toEqual([
+      {
+        blockTimeMs: 1_700_000_003_000,
+        revision: 0,
+        title: "Plain raw object",
+        message: "plain body",
+        updatedAt: null,
+      },
+      {
+        blockTimeMs: 1_700_000_002_000,
+        revision: 0,
+        title: "Missing revision",
+        message: "missing revision body",
+        updatedAt: null,
+      },
+      {
+        blockTimeMs: 1_700_000_001_000,
+        revision: 1,
+        title: "Valid revision",
+        message: "valid body",
+        updatedAt: 1_700_000_001_000,
+      },
+    ]);
+  });
 });
