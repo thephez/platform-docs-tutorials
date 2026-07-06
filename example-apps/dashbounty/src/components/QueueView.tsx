@@ -1,24 +1,28 @@
 import { useEffect, useState } from "react";
 
 import { CopyableId } from "./CopyableId";
+import { fetchFrozenStatus } from "../dash/frozenStatus";
 import { errorMessage } from "../dash/logger";
 import {
-  listAllReports,
-  listReportsByComponent,
-  listReportsBySeverity,
-  type Report,
+  listAllSubmissions,
+  listSubmissionsByComponent,
+  listSubmissionsBySeverity,
+  type Submission,
 } from "../dash/queries";
-import { fetchFrozenStatus } from "../dash/frozenStatus";
 import { formatDate, severityLabel } from "../lib/format";
 import { useSession } from "../session/useSession";
-import type { ReportSeverity } from "../dash/submitReport";
+import type { SubmissionSeverity } from "../dash/submitSubmission";
 
-export function ReportsView() {
+export function QueueView() {
   const session = useSession();
-  const [severityFilter, setSeverityFilter] = useState<ReportSeverity | "">("");
+  const [severityFilter, setSeverityFilter] = useState<SubmissionSeverity | "">(
+    "",
+  );
   const [componentFilter, setComponentFilter] = useState("");
-  const [reports, setReports] = useState<Report[]>([]);
-  const [frozenOwners, setFrozenOwners] = useState<Set<string>>(new Set());
+  const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [suspendedOwners, setSuspendedOwners] = useState<Set<string>>(
+    new Set(),
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,7 +31,7 @@ export function ReportsView() {
     void (async () => {
       const { sdk, contractId } = session;
       if (!sdk || !contractId) {
-        if (!cancelled) setReports([]);
+        if (!cancelled) setSubmissions([]);
         return;
       }
       setLoading(true);
@@ -35,38 +39,38 @@ export function ReportsView() {
       try {
         const trimmedComponent = componentFilter.trim();
         const results = trimmedComponent
-          ? await listReportsByComponent({
+          ? await listSubmissionsByComponent({
               sdk,
               contractId,
               component: trimmedComponent,
             })
           : severityFilter
-            ? await listReportsBySeverity({
+            ? await listSubmissionsBySeverity({
                 sdk,
                 contractId,
                 severity: severityFilter,
               })
-            : await listAllReports({ sdk, contractId });
+            : await listAllSubmissions({ sdk, contractId });
         if (cancelled) return;
-        setReports(results);
+        setSubmissions(results);
 
         const owners = [...new Set(results.map((r) => r.ownerId))];
-        const frozen = new Set<string>();
+        const suspended = new Set<string>();
         await Promise.all(
           owners.map(async (ownerId) => {
             try {
-              const isFrozen = await fetchFrozenStatus({
+              const isSuspended = await fetchFrozenStatus({
                 sdk,
                 contractId,
                 identityId: ownerId,
               });
-              if (isFrozen) frozen.add(ownerId);
+              if (isSuspended) suspended.add(ownerId);
             } catch {
               // best-effort; leave unmarked on failure
             }
           }),
         );
-        if (!cancelled) setFrozenOwners(frozen);
+        if (!cancelled) setSuspendedOwners(suspended);
       } catch (err) {
         if (!cancelled) setError(errorMessage(err));
       } finally {
@@ -81,6 +85,11 @@ export function ReportsView() {
   return (
     <div>
       <div className="card">
+        <p className="muted">
+          Sift is a token-gated review queue for separating real security signal
+          from AI slop. Submissions are public summaries plus optional evidence
+          hashes.
+        </p>
         <div className="row">
           <div className="field" style={{ flex: 1, marginBottom: 0 }}>
             <label htmlFor="filter-severity">Filter by severity</label>
@@ -88,7 +97,9 @@ export function ReportsView() {
               id="filter-severity"
               value={severityFilter}
               onChange={(event) => {
-                setSeverityFilter(event.target.value as ReportSeverity | "");
+                setSeverityFilter(
+                  event.target.value as SubmissionSeverity | "",
+                );
                 setComponentFilter("");
               }}
             >
@@ -115,32 +126,32 @@ export function ReportsView() {
       </div>
 
       {error && <div className="notice error">{error}</div>}
-      {loading && <p className="muted">Loading…</p>}
+      {loading && <p className="muted">Loading...</p>}
 
       <div className="list">
-        {reports.map((report) => (
-          <div key={report.id} className="card">
+        {submissions.map((submission) => (
+          <div key={submission.id} className="card">
             <div className="row between">
-              <strong>{report.title}</strong>
-              <span className={`badge ${report.severity}`}>
-                {severityLabel(report.severity)}
+              <strong>{submission.title}</strong>
+              <span className={`badge ${submission.severity}`}>
+                {severityLabel(submission.severity)}
               </span>
             </div>
-            <p className="muted">{report.component}</p>
-            <p>{report.description}</p>
+            <p className="muted">{submission.component}</p>
+            <p>{submission.description}</p>
             <div className="row between">
               <span className="muted row">
-                <CopyableId id={report.ownerId} len={6} /> ·{" "}
-                {formatDate(report.createdAt)}
+                <CopyableId id={submission.ownerId} len={6} /> ·{" "}
+                {formatDate(submission.createdAt)}
               </span>
-              {frozenOwners.has(report.ownerId) && (
-                <span className="badge frozen">Reporter frozen</span>
+              {suspendedOwners.has(submission.ownerId) && (
+                <span className="badge frozen">Access suspended</span>
               )}
             </div>
           </div>
         ))}
-        {!loading && reports.length === 0 && (
-          <p className="muted">No reports found.</p>
+        {!loading && submissions.length === 0 && (
+          <p className="muted">No submissions found.</p>
         )}
       </div>
     </div>

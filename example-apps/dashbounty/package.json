@@ -1,7 +1,7 @@
 {
-  "name": "dashbounty",
-  "displayName": "DashBounty",
-  "description": "Token-gated bug bounty reports with a 2-of-3 group-slashed triage panel on Dash Platform testnet.",
+  "name": "sift",
+  "displayName": "Sift",
+  "description": "Token-gated submission queue with separate access and revocation groups on Dash Platform testnet.",
   "private": true,
   "version": "0.0.0",
   "type": "module",

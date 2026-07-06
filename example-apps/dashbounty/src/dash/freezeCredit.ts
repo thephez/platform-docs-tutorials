@@ -1,12 +1,8 @@
 /**
- * Propose or co-sign a Triage Panel freeze of a researcher's Researcher
- * Credit balance.
+ * Propose or co-sign a Review Panel suspension of a submitter's Sift tokens.
  *
- * `freezeRules` gates this on `AuthorizedActionTakers.MainGroup()` — the
- * token's current main control group, 2-of-3. That position is dynamic
- * (group 0 at launch, higher after a roster rotation), so callers pass the
- * active `groupPosition` they resolved via panel.ts's fetchPanelInfo /
- * fetchActivePanelPosition. A single call from `sdk.tokens.freeze(...)`
+ * `freezeRules` gates this on the access group (2-of-3). A single call from
+ * `sdk.tokens.freeze(...)`
  * covers both roles depending on `groupInfo`:
  *   - Proposer (first signer): pass no `actionId`. Uses
  *     `GroupStateTransitionInfoStatus.proposer(groupContractPosition)`,
@@ -33,7 +29,7 @@
 import { GroupStateTransitionInfoStatus } from "@dashevo/evo-sdk";
 
 import { errorMessage, type Logger } from "./logger";
-import { RESEARCHER_CREDIT_POSITION } from "./researcherCredit";
+import { SIFT_TOKEN_POSITION } from "./siftToken";
 import type {
   DashKeyManager,
   DashSdk,
@@ -53,7 +49,7 @@ export async function freezeCredit({
   sdk: DashSdk;
   keyManager: DashKeyManager;
   contractId: string;
-  /** The ACTIVE main-control-group position — see fetchActivePanelPosition. */
+  /** Access group position for suspend access actions. */
   groupPosition: number;
   frozenIdentityId: string;
   /** Pass the pending action's ID to co-sign; omit to propose a new one. */
@@ -70,13 +66,13 @@ export async function freezeCredit({
 
     log?.(
       actionId
-        ? `Co-signing freeze proposal for ${frozenIdentityId}…`
-        : `Proposing freeze for ${frozenIdentityId}…`,
+        ? `Co-signing suspend access proposal for ${frozenIdentityId}...`
+        : `Proposing suspend access for ${frozenIdentityId}...`,
     );
 
     const result = await sdk.tokens.freeze({
       dataContractId: contractId,
-      tokenPosition: RESEARCHER_CREDIT_POSITION,
+      tokenPosition: SIFT_TOKEN_POSITION,
       authorityId: identity.id.toString(),
       frozenIdentityId,
       publicNote,
@@ -86,15 +82,18 @@ export async function freezeCredit({
     });
 
     if (result.document) {
-      log?.(`Freeze executed — ${frozenIdentityId} is now frozen.`, "success");
+      log?.(
+        `Access suspended — ${frozenIdentityId} cannot spend Sift tokens.`,
+        "success",
+      );
     } else {
       log?.(
-        `Freeze proposal recorded (power ${result.groupPower ?? "?"}), awaiting more signatures.`,
+        `Suspend access proposal recorded (power ${result.groupPower ?? "?"}), awaiting more signatures.`,
       );
     }
     return result;
   } catch (e) {
-    log?.(`Freeze error: ${errorMessage(e)}`, "error");
+    log?.(`Suspend access error: ${errorMessage(e)}`, "error");
     throw e;
   }
 }

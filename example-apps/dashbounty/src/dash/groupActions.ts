@@ -1,19 +1,15 @@
 /**
- * Discover pending (or closed) Triage Panel group actions and who has
- * signed them.
+ * Discover pending Sift panel group actions and who has signed them.
  *
- * A "group action" is created the moment a panel member proposes a freeze,
- * unfreeze, or destroy — it stays ACTIVE until accumulated signing power
- * reaches the group's requiredPower, at which point Platform executes it
- * and the action moves to CLOSED. `listPendingActions` is how a second (or
- * third) panelist discovers the `actionId` they need to pass to
- * freezeCredit/unfreezeCredit/destroyFrozenCredit as a co-signer.
+ * A "group action" is created the moment a panel member proposes suspend,
+ * restore, or revoke — it stays ACTIVE until accumulated signing power
+ * reaches the group's requiredPower, at which point Platform executes it.
  * `listActionSigners` is how the UI shows "1 of 2 required" progress and
  * disables the sign button for someone who already signed.
  *
- * Group actions live under a specific group position, and the acting panel
- * is the token's CURRENT main control group (dynamic after a rotation) —
- * callers pass the active `groupPosition` resolved via panel.ts.
+ * Group actions live under a specific group position. Sift maps each
+ * operation to an explicit group so future functions can use different
+ * authorities.
  *
  * SDK methods: sdk.group.actions(...), sdk.group.actionSigners(...)
  */
@@ -35,9 +31,9 @@ export interface PendingAction {
 export function describeGroupAction(eventName: string): string {
   const lower = eventName.toLowerCase();
   if (lower.includes("freeze") && !lower.includes("unfreeze"))
-    return "Freeze proposal";
-  if (lower.includes("unfreeze")) return "Unfreeze proposal";
-  if (lower.includes("destroy")) return "Slash (destroy) proposal";
+    return "Suspend access proposal";
+  if (lower.includes("unfreeze")) return "Restore access proposal";
+  if (lower.includes("destroy")) return "Revoke tokens proposal";
   return eventName;
 }
 
@@ -49,7 +45,7 @@ export async function listPendingActions({
 }: {
   sdk: DashSdk;
   contractId: string;
-  /** The ACTIVE main-control-group position — see fetchActivePanelPosition. */
+  /** Explicit panel group position for this action family. */
   groupPosition: number;
   log?: Logger;
 }): Promise<PendingAction[]> {
@@ -90,7 +86,7 @@ export async function listActionSigners({
 }: {
   sdk: DashSdk;
   contractId: string;
-  /** The ACTIVE main-control-group position — see fetchActivePanelPosition. */
+  /** Explicit panel group position for this action family. */
   groupPosition: number;
   actionId: string;
   requiredPower: number;

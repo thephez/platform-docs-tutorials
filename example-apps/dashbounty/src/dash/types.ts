@@ -80,7 +80,7 @@ export interface DashSdk {
       where?: unknown[][];
       orderBy?: unknown[][];
       limit?: number;
-    }): Promise<DashReportQueryResults>;
+    }): Promise<DashSubmissionQueryResults>;
     get(
       contractId: string,
       documentTypeName: string,
@@ -204,7 +204,7 @@ export interface DashSdk {
   };
 }
 
-export interface DashReportQueryJson extends Record<string, unknown> {
+export interface DashSubmissionQueryJson extends Record<string, unknown> {
   $id?: string;
   id?: string;
   $ownerId?: string;
@@ -217,11 +217,11 @@ export interface DashReportQueryJson extends Record<string, unknown> {
   pocHash?: string;
 }
 
-export interface DashReportQueryDocument extends Record<string, unknown> {
-  toJSON?: () => DashReportQueryJson;
+export interface DashSubmissionQueryDocument extends Record<string, unknown> {
+  toJSON?: () => DashSubmissionQueryJson;
 }
 
-export type DashReportQueryResults =
-  | DashReportQueryDocument[]
-  | Map<string, DashReportQueryDocument>
-  | Record<string, DashReportQueryDocument>;
+export type DashSubmissionQueryResults =
+  | DashSubmissionQueryDocument[]
+  | Map<string, DashSubmissionQueryDocument>
+  | Record<string, DashSubmissionQueryDocument>;

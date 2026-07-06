@@ -59,164 +59,115 @@ vi.mock("@dashevo/evo-sdk", () => ({
   },
 }));
 
-describe("bounty contract schema", () => {
-  it("charges 1 Researcher Credit per report, transferred to the contract owner", async () => {
-    const { REPORT_SCHEMAS } = await import("../src/dash/contract");
-    const { RESEARCHER_CREDIT_POSITION } =
-      await import("../src/dash/researcherCredit");
+describe("Sift contract schema", () => {
+  it("charges 1 Sift token per submission", async () => {
+    const { SUBMISSION_SCHEMAS } = await import("../src/dash/contract");
+    const { SIFT_TOKEN_POSITION } = await import("../src/dash/siftToken");
 
-    expect(REPORT_SCHEMAS.report.creationRestrictionMode).toBe(0);
-    expect(REPORT_SCHEMAS.report.tokenCost.create).toEqual({
-      tokenPosition: RESEARCHER_CREDIT_POSITION,
+    expect(SUBMISSION_SCHEMAS.submission.creationRestrictionMode).toBe(0);
+    expect(SUBMISSION_SCHEMAS.submission.tokenCost.create).toEqual({
+      tokenPosition: SIFT_TOKEN_POSITION,
       amount: 1,
-      effect: 0, // TransferTokenToContractOwner, NOT BurnToken — see contract.ts header
+      effect: 0,
       gasFeesPaidBy: 0,
     });
   });
 
-  it("never allows deleting a report, even post-slash", async () => {
-    const { REPORT_SCHEMAS } = await import("../src/dash/contract");
-    expect(REPORT_SCHEMAS.report.canBeDeleted).toBe(false);
-  });
-
-  it("keeps report edit history", async () => {
-    const { REPORT_SCHEMAS } = await import("../src/dash/contract");
-    expect(REPORT_SCHEMAS.report.documentsKeepHistory).toBe(true);
+  it("keeps submissions immutable by deletion but mutable with history", async () => {
+    const { SUBMISSION_SCHEMAS } = await import("../src/dash/contract");
+    expect(SUBMISSION_SCHEMAS.submission.canBeDeleted).toBe(false);
+    expect(SUBMISSION_SCHEMAS.submission.documentsMutable).toBe(true);
+    expect(SUBMISSION_SCHEMAS.submission.documentsKeepHistory).toBe(true);
   });
 });
 
-describe("Researcher Credit token configuration", () => {
-  it("gates freeze, unfreeze, and destroyFrozenFunds on MainGroup — not a hard-coded position", async () => {
-    const { createResearcherCreditConfiguration, PANEL_GROUP_POSITION } =
-      await import("../src/dash/contract");
+describe("Sift token configuration", () => {
+  it("routes suspend/restore to access group and revoke to revocation group", async () => {
+    const {
+      ACCESS_GROUP_POSITION,
+      REVOCATION_GROUP_POSITION,
+      createSiftTokenConfiguration,
+    } = await import("../src/dash/contract");
 
-    // The mocked TokenConfiguration constructor stores its whole options
-    // object under `.options` rather than spreading it onto properties.
-    const config = createResearcherCreditConfiguration(
-      "owner-1",
-    ) as unknown as {
+    const config = createSiftTokenConfiguration("owner-1") as unknown as {
       options: {
         freezeRules: { options: { authorizedToMakeChange: unknown } };
         unfreezeRules: { options: { authorizedToMakeChange: unknown } };
         destroyFrozenFundsRules: {
           options: { authorizedToMakeChange: unknown };
         };
-        mainControlGroup: number;
       };
     };
 
-    // MainGroup() follows the token's CURRENT main control group, which is
-    // what lets a roster rotation (append group + repoint) move these
-    // powers without rewriting the rules.
-    const mainGroupSentinel = { type: "MainGroup" };
-    expect(config.options.freezeRules.options.authorizedToMakeChange).toEqual(
-      mainGroupSentinel,
-    );
+    expect(config.options.freezeRules.options.authorizedToMakeChange).toEqual({
+      type: "Group",
+      position: ACCESS_GROUP_POSITION,
+    });
     expect(config.options.unfreezeRules.options.authorizedToMakeChange).toEqual(
-      mainGroupSentinel,
+      {
+        type: "Group",
+        position: ACCESS_GROUP_POSITION,
+      },
     );
     expect(
       config.options.destroyFrozenFundsRules.options.authorizedToMakeChange,
-    ).toEqual(mainGroupSentinel);
-    // …while governance STARTS at the founding panel, group 0.
-    expect(config.options.mainControlGroup).toBe(PANEL_GROUP_POSITION);
-  });
-
-  it("keeps admin control of freeze/unfreeze/destroy on MainGroup too", async () => {
-    const { createResearcherCreditConfiguration } =
-      await import("../src/dash/contract");
-    const config = createResearcherCreditConfiguration(
-      "owner-1",
-    ) as unknown as {
-      options: {
-        freezeRules: { options: { adminActionTakers: unknown } };
-        unfreezeRules: { options: { adminActionTakers: unknown } };
-        destroyFrozenFundsRules: { options: { adminActionTakers: unknown } };
-      };
-    };
-
-    const mainGroupSentinel = { type: "MainGroup" };
-    expect(config.options.freezeRules.options.adminActionTakers).toEqual(
-      mainGroupSentinel,
-    );
-    expect(config.options.unfreezeRules.options.adminActionTakers).toEqual(
-      mainGroupSentinel,
-    );
-    expect(
-      config.options.destroyFrozenFundsRules.options.adminActionTakers,
-    ).toEqual(mainGroupSentinel);
-  });
-
-  it("lets the contract owner repoint the main control group — the rotation escape hatch", async () => {
-    const { createResearcherCreditConfiguration } =
-      await import("../src/dash/contract");
-    const config = createResearcherCreditConfiguration(
-      "owner-1",
-    ) as unknown as {
-      options: { mainControlGroupCanBeModified: unknown };
-    };
-    // Existing groups are immutable on-chain, so ContractOwner here is what
-    // makes roster rotation possible at all: the operator appends a new
-    // group, then repoints mainControlGroup at it (rotatePanelRoster.ts).
-    expect(config.options.mainControlGroupCanBeModified).toEqual({
-      type: "ContractOwner",
+    ).toEqual({
+      type: "Group",
+      position: REVOCATION_GROUP_POSITION,
     });
   });
 
-  it("locks manual burning to NoOne — the only way credits disappear is via destroyFrozen", async () => {
-    const { createResearcherCreditConfiguration } =
+  it("locks manual burning and main group rotation", async () => {
+    const { createSiftTokenConfiguration } =
       await import("../src/dash/contract");
-    const config = createResearcherCreditConfiguration(
-      "owner-1",
-    ) as unknown as {
+    const config = createSiftTokenConfiguration("owner-1") as unknown as {
       options: {
         manualBurningRules: { options: { authorizedToMakeChange: unknown } };
+        mainControlGroupCanBeModified: unknown;
       };
     };
+
     expect(
       config.options.manualBurningRules.options.authorizedToMakeChange,
     ).toEqual({ type: "NoOne" });
+    expect(config.options.mainControlGroupCanBeModified).toEqual({
+      type: "NoOne",
+    });
   });
 
-  it("seeds a nonzero base supply so the owner has a working pool at genesis", async () => {
-    const { createResearcherCreditConfiguration } =
+  it("seeds a nonzero base supply so the owner has a working token pool", async () => {
+    const { createSiftTokenConfiguration } =
       await import("../src/dash/contract");
-    const config = createResearcherCreditConfiguration(
-      "owner-1",
-    ) as unknown as { options: { baseSupply: bigint } };
+    const config = createSiftTokenConfiguration("owner-1") as unknown as {
+      options: { baseSupply: bigint };
+    };
     expect(config.options.baseSupply).toBeGreaterThan(0n);
   });
 });
 
-describe("Triage Panel group", () => {
-  it("builds a genuine 2-of-3 group: 3 members at equal power, requiredPower 2", async () => {
-    const { createTriagePanelGroup, PANEL_REQUIRED_POWER } =
-      await import("../src/dash/contract");
-    const group = createTriagePanelGroup([
-      "panelist-a",
-      "panelist-b",
-      "panelist-c",
-    ]);
+describe("Sift panel groups", () => {
+  it("builds access and revocation groups with different thresholds", async () => {
+    const {
+      ACCESS_GROUP_POSITION,
+      REVOCATION_GROUP_POSITION,
+      createSiftGroups,
+    } = await import("../src/dash/contract");
 
-    expect(PANEL_REQUIRED_POWER).toBe(2);
-    expect(group.requiredPower).toBe(2);
-    expect(group.members.size).toBe(3);
-    expect([...group.members.values()]).toEqual([1, 1, 1]);
+    const groups = createSiftGroups(["panelist-a", "panelist-b", "panelist-c"]);
+
+    expect(groups[ACCESS_GROUP_POSITION].requiredPower).toBe(2);
+    expect(groups[REVOCATION_GROUP_POSITION].requiredPower).toBe(3);
+    expect(groups[ACCESS_GROUP_POSITION].members.size).toBe(3);
+    expect(groups[REVOCATION_GROUP_POSITION].members.size).toBe(3);
   });
 
-  it("rejects a panel that isn't exactly 3 members", async () => {
-    const { createTriagePanelGroup } = await import("../src/dash/contract");
-    expect(() => createTriagePanelGroup(["a", "b"])).toThrow(/exactly 3/);
-    expect(() => createTriagePanelGroup(["a", "b", "c", "d"])).toThrow(
+  it("rejects panels without exactly 3 distinct members", async () => {
+    const { createPanelGroup } = await import("../src/dash/contract");
+    expect(() => createPanelGroup(["a", "b"], 2)).toThrow(/exactly 3/);
+    expect(() => createPanelGroup(["a", "b", "c", "d"], 2)).toThrow(
       /exactly 3/,
     );
-  });
-
-  it("rejects a panel with duplicate member IDs so the group cannot silently collapse below 3 signers", async () => {
-    const { createTriagePanelGroup } = await import("../src/dash/contract");
-    expect(() => createTriagePanelGroup(["a", "a", "b"])).toThrow(/distinct/);
-    expect(() => createTriagePanelGroup(["a", "b", "a"])).toThrow(/distinct/);
-    expect(() => createTriagePanelGroup(["a", "a", "a"])).toThrow(/distinct/);
+    expect(() => createPanelGroup(["a", "a", "b"], 2)).toThrow(/distinct/);
   });
 });
 
@@ -225,15 +176,18 @@ describe("registerContract", () => {
     vi.unstubAllGlobals();
   });
 
-  it("assigns the Triage Panel group to dataContract.groups, not the constructor", async () => {
+  it("assigns both Sift panel groups before publishing", async () => {
     vi.stubGlobal("localStorage", {
       getItem: vi.fn(() => null),
       setItem: vi.fn(),
       removeItem: vi.fn(),
     } as unknown as Storage);
 
-    const { registerContract, PANEL_GROUP_POSITION } =
-      await import("../src/dash/contract");
+    const {
+      ACCESS_GROUP_POSITION,
+      REVOCATION_GROUP_POSITION,
+      registerContract,
+    } = await import("../src/dash/contract");
 
     const identity = { id: { toString: () => "owner-1" } };
     const identityKey = { id: "key-1" };
@@ -260,7 +214,9 @@ describe("registerContract", () => {
         { members: Map<string, number>; requiredPower: number }
       >;
     };
-    expect(dataContract.groups[PANEL_GROUP_POSITION].requiredPower).toBe(2);
-    expect(dataContract.groups[PANEL_GROUP_POSITION].members.size).toBe(3);
+    expect(dataContract.groups[ACCESS_GROUP_POSITION].requiredPower).toBe(2);
+    expect(dataContract.groups[REVOCATION_GROUP_POSITION].requiredPower).toBe(
+      3,
+    );
   });
 });

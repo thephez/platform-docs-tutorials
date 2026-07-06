@@ -1,6 +1,6 @@
 import { test, expect, HAS_MNEMONIC, loginAs } from "./fixtures";
 
-test.describe("Report submission (auth-gated)", () => {
+test.describe("Sift submission (auth-gated)", () => {
   test.describe.configure({ mode: "serial" });
 
   test.skip(
@@ -8,44 +8,46 @@ test.describe("Report submission (auth-gated)", () => {
     "PLATFORM_MNEMONIC not set — skipping auth-gated specs",
   );
 
-  test("Submit tab shows the researcher's credit balance once signed in", async ({
+  test("Submit tab shows the Sift token balance once signed in", async ({
     page,
   }) => {
     await loginAs(page, 0);
-    await page.getByRole("button", { name: "Submit report" }).click();
-    await expect(page.getByText(/Researcher Credit balance/)).toBeVisible({
+    await page.getByRole("button", { name: "Submit" }).click();
+    await expect(page.getByText(/Sift token balance/)).toBeVisible({
       timeout: 30_000,
     });
   });
 
-  // Genuine write: files one real report, spending 1 Researcher Credit.
-  // Reports can't be deleted (canBeDeleted: false), so this isn't
+  // Genuine write: files one real submission, spending 1 Sift token.
+  // Submissions can't be deleted (canBeDeleted: false), so this isn't
   // reversible — matches dashproof-lab's anchor spec, which accepts the
   // same trade-off for the same reason (immutable-by-design record).
-  test("files a report and it appears under My reports", async ({ page }) => {
+  test("files a submission and it appears under My submissions", async ({
+    page,
+  }) => {
     await loginAs(page, 0);
-    await page.getByRole("button", { name: "Submit report" }).click();
+    await page.getByRole("button", { name: "Submit" }).click();
 
     const balanceText = await page
-      .getByText(/Researcher Credit balance/)
+      .getByText(/Sift token balance/)
       .textContent({ timeout: 30_000 });
     if (/balance:\s*0\b/i.test(balanceText ?? "")) {
-      test.skip(true, "Researcher identity has no credits left to spend.");
+      test.skip(true, "Submitter identity has no Sift tokens left to spend.");
     }
 
-    const title = `E2E test report ${Date.now()}`;
+    const title = `E2E test submission ${Date.now()}`;
     await page.getByLabel("Title").fill(title);
     await page.getByLabel("Affected component").fill("E2E");
     await page
-      .getByLabel("Description")
-      .fill("Filed by the DashBounty Playwright suite.");
-    await page.getByRole("button", { name: /File report/ }).click();
+      .getByLabel("Public summary")
+      .fill("Filed by the Sift Playwright suite.");
+    await page.getByRole("button", { name: /Spend 1 Sift token/ }).click();
 
-    await expect(page.getByText("Report filed.")).toBeVisible({
+    await expect(page.getByText("Submission filed.")).toBeVisible({
       timeout: 60_000,
     });
 
-    await page.getByRole("button", { name: "My reports" }).click();
+    await page.getByRole("button", { name: "My submissions" }).click();
     await expect(page.getByText(title)).toBeVisible({ timeout: 30_000 });
   });
 });

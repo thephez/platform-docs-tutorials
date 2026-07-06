@@ -1,20 +1,19 @@
 /**
- * Propose or co-sign a Triage Panel reversal of a mistaken freeze.
+ * Propose or co-sign a Review Panel restoration of suspended access.
  *
  * Same propose/co-sign unification as freezeCredit.ts — see that file's
  * header for the full explanation of `groupInfo`. This is the safety valve:
- * if the panel froze the wrong researcher (or new evidence clears them),
- * unfreeze restores their ability to spend credits without needing a
- * destroy to have happened. `unfreezeRules` is gated on the same
- * MainGroup() (current main control group) as freeze/destroy, so callers
- * pass the same dynamically-resolved `groupPosition`.
+ * if the panel suspended the wrong submitter (or new evidence clears them),
+ * unfreeze restores their ability to spend Sift tokens without requiring
+ * a revocation action. `unfreezeRules` is gated on the same access group
+ * as suspend.
  *
  * SDK method: sdk.tokens.unfreeze({ ..., groupInfo })
  */
 import { GroupStateTransitionInfoStatus } from "@dashevo/evo-sdk";
 
 import { errorMessage, type Logger } from "./logger";
-import { RESEARCHER_CREDIT_POSITION } from "./researcherCredit";
+import { SIFT_TOKEN_POSITION } from "./siftToken";
 import type {
   DashKeyManager,
   DashSdk,
@@ -34,7 +33,7 @@ export async function unfreezeCredit({
   sdk: DashSdk;
   keyManager: DashKeyManager;
   contractId: string;
-  /** The ACTIVE main-control-group position — see fetchActivePanelPosition. */
+  /** Access group position for restore access actions. */
   groupPosition: number;
   frozenIdentityId: string;
   /** Pass the pending action's ID to co-sign; omit to propose a new one. */
@@ -51,13 +50,13 @@ export async function unfreezeCredit({
 
     log?.(
       actionId
-        ? `Co-signing unfreeze proposal for ${frozenIdentityId}…`
-        : `Proposing unfreeze for ${frozenIdentityId}…`,
+        ? `Co-signing restore access proposal for ${frozenIdentityId}...`
+        : `Proposing restore access for ${frozenIdentityId}...`,
     );
 
     const result = await sdk.tokens.unfreeze({
       dataContractId: contractId,
-      tokenPosition: RESEARCHER_CREDIT_POSITION,
+      tokenPosition: SIFT_TOKEN_POSITION,
       authorityId: identity.id.toString(),
       frozenIdentityId,
       publicNote,
@@ -68,17 +67,17 @@ export async function unfreezeCredit({
 
     if (result.document) {
       log?.(
-        `Unfreeze executed — ${frozenIdentityId} can spend credits again.`,
+        `Access restored — ${frozenIdentityId} can spend Sift tokens again.`,
         "success",
       );
     } else {
       log?.(
-        `Unfreeze proposal recorded (power ${result.groupPower ?? "?"}), awaiting more signatures.`,
+        `Restore access proposal recorded (power ${result.groupPower ?? "?"}), awaiting more signatures.`,
       );
     }
     return result;
   } catch (e) {
-    log?.(`Unfreeze error: ${errorMessage(e)}`, "error");
+    log?.(`Restore access error: ${errorMessage(e)}`, "error");
     throw e;
   }
 }

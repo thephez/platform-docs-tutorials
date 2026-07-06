@@ -13,18 +13,16 @@ vi.mock("@dashevo/evo-sdk", () => ({
   Document: mockDocumentCtor,
 }));
 
-describe("submitReport", () => {
-  it("charges the researcher 1 Researcher Credit via tokenPaymentInfo", async () => {
-    const { submitReport } = await import("../src/dash/submitReport");
-    const { RESEARCHER_CREDIT_PAYMENT_INFO } =
-      await import("../src/dash/researcherCredit");
+describe("submitSubmission", () => {
+  it("charges 1 Sift token via tokenPaymentInfo", async () => {
+    const { submitSubmission } = await import("../src/dash/submitSubmission");
+    const { SIFT_TOKEN_PAYMENT_INFO } = await import("../src/dash/siftToken");
     const identity = { id: "identity-1" };
     const identityKey = { id: "key-1" };
     const signer = { id: "signer-1" };
     const create = vi.fn().mockResolvedValue(undefined);
-    const log = vi.fn();
 
-    await submitReport({
+    await submitSubmission({
       sdk: { documents: { create } } as never,
       keyManager: {
         async getAuth() {
@@ -32,13 +30,12 @@ describe("submitReport", () => {
         },
       } as never,
       contractId: "contract-1",
-      report: {
+      submission: {
         title: "SQLi in login form",
         severity: "high",
         component: "Auth",
-        description: "Unsanitized input allows SQL injection.",
+        description: "Public summary of suspicious input handling.",
       },
-      log,
     });
 
     expect(mockDocumentCtor).toHaveBeenCalledWith({
@@ -46,9 +43,9 @@ describe("submitReport", () => {
         title: "SQLi in login form",
         severity: "high",
         component: "Auth",
-        description: "Unsanitized input allows SQL injection.",
+        description: "Public summary of suspicious input handling.",
       },
-      documentTypeName: "report",
+      documentTypeName: "submission",
       dataContractId: "contract-1",
       ownerId: identity.id,
     });
@@ -56,15 +53,15 @@ describe("submitReport", () => {
       document: mockDocumentCtor.mock.instances[0],
       identityKey,
       signer,
-      tokenPaymentInfo: RESEARCHER_CREDIT_PAYMENT_INFO,
+      tokenPaymentInfo: SIFT_TOKEN_PAYMENT_INFO,
     });
   });
 
-  it("includes the optional pocHash when provided", async () => {
-    const { submitReport } = await import("../src/dash/submitReport");
+  it("includes the optional evidence hash when provided", async () => {
+    const { submitSubmission } = await import("../src/dash/submitSubmission");
     const create = vi.fn().mockResolvedValue(undefined);
 
-    await submitReport({
+    await submitSubmission({
       sdk: { documents: { create } } as never,
       keyManager: {
         async getAuth() {
@@ -76,11 +73,11 @@ describe("submitReport", () => {
         },
       } as never,
       contractId: "contract-1",
-      report: {
+      submission: {
         title: "XSS in comment field",
         severity: "medium",
         component: "Frontend",
-        description: "Reflected XSS via unescaped comment body.",
+        description: "Public summary of unsafe rendering.",
         pocHash: "a".repeat(44),
       },
     });
@@ -92,8 +89,8 @@ describe("submitReport", () => {
     );
   });
 
-  it("rejects an empty title, component, or description", async () => {
-    const { submitReport } = await import("../src/dash/submitReport");
+  it("rejects an empty title, component, or summary", async () => {
+    const { submitSubmission } = await import("../src/dash/submitSubmission");
     const base = {
       sdk: { documents: { create: vi.fn() } } as never,
       keyManager: {
@@ -109,9 +106,9 @@ describe("submitReport", () => {
     };
 
     await expect(
-      submitReport({
+      submitSubmission({
         ...base,
-        report: {
+        submission: {
           title: "  ",
           severity: "low",
           component: "X",
@@ -121,9 +118,9 @@ describe("submitReport", () => {
     ).rejects.toThrow(/title/i);
 
     await expect(
-      submitReport({
+      submitSubmission({
         ...base,
-        report: {
+        submission: {
           title: "T",
           severity: "low",
           component: "  ",
@@ -133,15 +130,15 @@ describe("submitReport", () => {
     ).rejects.toThrow(/component/i);
 
     await expect(
-      submitReport({
+      submitSubmission({
         ...base,
-        report: {
+        submission: {
           title: "T",
           severity: "low",
           component: "X",
           description: "  ",
         },
       }),
-    ).rejects.toThrow(/description/i);
+    ).rejects.toThrow(/summary/i);
   });
 });

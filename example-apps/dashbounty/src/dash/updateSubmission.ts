@@ -1,14 +1,9 @@
 /**
- * Edit a researcher's own report while it's still open.
+ * Edit a submitter's own Sift submission.
  *
- * Every document mutation on Platform requires fetching the current
- * on-chain Document first and bumping its `revision` by exactly 1 — Platform
- * rejects mutations that don't strictly increase the revision number.
- *
- * `report` has `documentsMutable: true`, so this is allowed by the schema
- * at any time. App-level policy (not Platform) should stop calling this
- * once the researcher's identity is frozen or the report is known to be
- * slashed — check frozenStatus.ts before offering an edit UI.
+ * Every document mutation on Platform requires fetching the current on-chain
+ * Document first and bumping its `revision` by exactly 1. Sift keeps history
+ * enabled so review-context edits stay visible.
  *
  * SDK methods: sdk.documents.get(...), sdk.documents.replace(...)
  */
@@ -16,34 +11,39 @@ import { Document } from "@dashevo/evo-sdk";
 
 import { errorMessage, type Logger } from "./logger";
 import type { DashKeyManager, DashSdk } from "./types";
+import type { SubmissionSeverity } from "./submitSubmission";
 
-export interface UpdateReportInput {
+export interface UpdateSubmissionInput {
   title?: string;
-  severity?: "low" | "medium" | "high" | "critical";
+  severity?: SubmissionSeverity;
   component?: string;
   description?: string;
 }
 
-export async function updateReport({
+export async function updateSubmission({
   sdk,
   keyManager,
   contractId,
-  reportId,
+  submissionId,
   updates,
   log,
 }: {
   sdk: DashSdk;
   keyManager: DashKeyManager;
   contractId: string;
-  reportId: string;
-  updates: UpdateReportInput;
+  submissionId: string;
+  updates: UpdateSubmissionInput;
   log?: Logger;
 }): Promise<void> {
   try {
     const { identityKey, signer } = await keyManager.getAuth();
 
-    const existing = await sdk.documents.get(contractId, "report", reportId);
-    if (!existing) throw new Error(`Report ${reportId} not found.`);
+    const existing = await sdk.documents.get(
+      contractId,
+      "submission",
+      submissionId,
+    );
+    if (!existing) throw new Error(`Submission ${submissionId} not found.`);
 
     const properties: Record<string, unknown> = {
       title: updates.title?.trim() ?? existing.title,
@@ -56,15 +56,15 @@ export async function updateReport({
     const revision = BigInt(existing.revision ?? 0) + 1n;
     const doc = new Document({
       properties,
-      documentTypeName: "report",
+      documentTypeName: "submission",
       dataContractId: contractId,
       ownerId: existing.$ownerId as string,
-      id: reportId,
+      id: submissionId,
       revision,
     });
 
     await sdk.documents.replace({ document: doc, identityKey, signer });
-    log?.(`Report ${reportId} updated.`, "success");
+    log?.(`Submission ${submissionId} updated.`, "success");
   } catch (e) {
     log?.(`Update error: ${errorMessage(e)}`, "error");
     throw e;

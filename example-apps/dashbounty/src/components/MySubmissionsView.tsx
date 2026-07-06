@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 
 import { errorMessage } from "../dash/logger";
-import { listReportsByOwner, type Report } from "../dash/queries";
-import { updateReport } from "../dash/updateReport";
+import { listSubmissionsByOwner, type Submission } from "../dash/queries";
+import { updateSubmission } from "../dash/updateSubmission";
 import { formatDate, severityLabel } from "../lib/format";
 import { useSession } from "../session/useSession";
 
-export function MyReportsView() {
+export function MySubmissionsView() {
   const session = useSession();
-  const [reports, setReports] = useState<Report[]>([]);
+  const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -17,18 +17,18 @@ export function MyReportsView() {
 
   async function refresh() {
     if (!session.sdk || !session.contractId || !session.identityId) {
-      setReports([]);
+      setSubmissions([]);
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const results = await listReportsByOwner({
+      const results = await listSubmissionsByOwner({
         sdk: session.sdk,
         contractId: session.contractId,
         ownerId: session.identityId,
       });
-      setReports(results);
+      setSubmissions(results);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -43,21 +43,21 @@ export function MyReportsView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.sdk, session.contractId, session.identityId]);
 
-  function startEdit(report: Report) {
-    setEditingId(report.id);
-    setEditDescription(report.description);
+  function startEdit(submission: Submission) {
+    setEditingId(submission.id);
+    setEditDescription(submission.description);
   }
 
-  async function saveEdit(reportId: string) {
+  async function saveEdit(submissionId: string) {
     if (!session.sdk || !session.keyManager || !session.contractId) return;
     setBusy(true);
     setError(null);
     try {
-      await updateReport({
+      await updateSubmission({
         sdk: session.sdk,
         keyManager: session.keyManager,
         contractId: session.contractId,
-        reportId,
+        submissionId,
         updates: { description: editDescription },
         log: session.log,
       });
@@ -71,26 +71,26 @@ export function MyReportsView() {
   }
 
   if (session.status !== "authenticated") {
-    return <div className="notice info">Sign in to see your reports.</div>;
+    return <div className="notice info">Sign in to see your submissions.</div>;
   }
 
   return (
     <div>
       {error && <div className="notice error">{error}</div>}
-      {loading && <p className="muted">Loading…</p>}
+      {loading && <p className="muted">Loading...</p>}
       <div className="list">
-        {reports.map((report) => (
-          <div key={report.id} className="card">
+        {submissions.map((submission) => (
+          <div key={submission.id} className="card">
             <div className="row between">
-              <strong>{report.title}</strong>
-              <span className={`badge ${report.severity}`}>
-                {severityLabel(report.severity)}
+              <strong>{submission.title}</strong>
+              <span className={`badge ${submission.severity}`}>
+                {severityLabel(submission.severity)}
               </span>
             </div>
             <p className="muted">
-              {report.component} · filed {formatDate(report.createdAt)}
+              {submission.component} · filed {formatDate(submission.createdAt)}
             </p>
-            {editingId === report.id ? (
+            {editingId === submission.id ? (
               <>
                 <textarea
                   rows={4}
@@ -101,7 +101,7 @@ export function MyReportsView() {
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={() => saveEdit(report.id)}
+                    onClick={() => saveEdit(submission.id)}
                   >
                     Save
                   </button>
@@ -116,11 +116,11 @@ export function MyReportsView() {
               </>
             ) : (
               <>
-                <p>{report.description}</p>
+                <p>{submission.description}</p>
                 <button
                   type="button"
                   className="secondary"
-                  onClick={() => startEdit(report)}
+                  onClick={() => startEdit(submission)}
                 >
                   Edit
                 </button>
@@ -128,8 +128,8 @@ export function MyReportsView() {
             )}
           </div>
         ))}
-        {!loading && reports.length === 0 && (
-          <p className="muted">You haven't filed any reports yet.</p>
+        {!loading && submissions.length === 0 && (
+          <p className="muted">You haven't filed any submissions yet.</p>
         )}
       </div>
     </div>

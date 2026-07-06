@@ -2,14 +2,14 @@ import { shortId } from "../lib/format";
 import type { SessionStatus } from "../session/SessionContext";
 
 export type View =
-  "submit" | "reports" | "my-reports" | "panel" | "roster" | "account";
+  "submit" | "queue" | "my-submissions" | "panel" | "panels" | "account";
 
 const TABS: { id: View; label: string }[] = [
-  { id: "submit", label: "Submit report" },
-  { id: "reports", label: "Browse reports" },
-  { id: "my-reports", label: "My reports" },
-  { id: "panel", label: "Triage panel" },
-  { id: "roster", label: "Roster" },
+  { id: "submit", label: "Submit" },
+  { id: "queue", label: "Queue" },
+  { id: "my-submissions", label: "My submissions" },
+  { id: "panel", label: "Review panel" },
+  { id: "panels", label: "Panels" },
   { id: "account", label: "Account" },
 ];
 
@@ -26,7 +26,7 @@ export function TopNav({
 }) {
   return (
     <div className="topbar">
-      <h1>DashBounty</h1>
+      <h1>Sift</h1>
       <div className="tabs">
         {TABS.map((tab) => (
           <button

@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sift Lite</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family:
+          Inter,
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        color: #172026;
+        background: #f4f5f2;
+      }
+
+      body {
+        margin: 0;
+      }
+
+      main {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 32px 20px 48px;
+      }
+
+      header {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        align-items: end;
+        margin-bottom: 24px;
+      }
+
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: 32px;
+        letter-spacing: 0;
+      }
+
+      h2 {
+        font-size: 18px;
+      }
+
+      .muted {
+        color: #657078;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.9fr);
+        gap: 18px;
+      }
+
+      section,
+      .item {
+        background: #fff;
+        border: 1px solid #d9ded8;
+        border-radius: 8px;
+      }
+
+      section {
+        padding: 18px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 16px 0;
+      }
+
+      select,
+      button {
+        border: 1px solid #b9c1ba;
+        border-radius: 6px;
+        background: #fff;
+        color: inherit;
+        font: inherit;
+        padding: 9px 11px;
+      }
+
+      button {
+        background: #174a43;
+        border-color: #174a43;
+        color: #fff;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
+      .list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .item {
+        padding: 14px;
+      }
+
+      .meta {
+        color: #657078;
+        font-size: 13px;
+        margin-top: 6px;
+      }
+
+      .description {
+        margin-top: 10px;
+        white-space: pre-wrap;
+      }
+
+      .status {
+        padding: 12px;
+        border-radius: 8px;
+        background: #eef2ef;
+        color: #31413d;
+      }
+
+      .error {
+        background: #fdebea;
+        color: #8b1e1b;
+      }
+
+      code {
+        word-break: break-all;
+      }
+
+      @media (max-width: 820px) {
+        header,
+        .grid {
+          display: block;
+        }
+
+        section + section {
+          margin-top: 18px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>Sift Lite</h1>
+          <p class="muted">Read-only submission queue and panel browser.</p>
+        </div>
+        <p class="muted">Dash Platform testnet</p>
+      </header>
+
+      <div class="grid">
+        <section>
+          <h2>Queue</h2>
+          <div class="toolbar">
+            <select id="severity-filter">
+              <option value="">All severities</option>
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+            <button id="refresh-submissions-btn" disabled>Refresh</button>
+          </div>
+          <div id="submissions-result" class="list"></div>
+        </section>
+
+        <section>
+          <h2>Panels</h2>
+          <p class="muted">Access is 2-of-3. Revocation is 3-of-3.</p>
+          <div class="toolbar">
+            <button id="refresh-panels-btn" disabled>Refresh</button>
+          </div>
+          <div id="panels-result" class="list"></div>
+        </section>
+      </div>
+    </main>
+
+    <script type="module">
+      import { DashSDK } from "https://esm.sh/@dashevo/evo-sdk@4.0.0";
+
+      const CONTRACT_ID = null;
+      const DOC_TYPE = "submission";
+      const ACCESS_GROUP_POSITION = 0;
+      const REVOCATION_GROUP_POSITION = 1;
+
+      const $ = (id) => document.getElementById(id);
+      const submissionsResultEl = $("submissions-result");
+      const panelsResultEl = $("panels-result");
+      const severityFilter = $("severity-filter");
+      const refreshSubmissionsBtn = $("refresh-submissions-btn");
+      const refreshPanelsBtn = $("refresh-panels-btn");
+
+      function statusLine(text, kind = "status") {
+        const el = document.createElement("div");
+        el.className = kind === "error" ? "status error" : "status";
+        el.textContent = text;
+        return el;
+      }
+
+      function itemEl(title, lines) {
+        const el = document.createElement("article");
+        el.className = "item";
+        const heading = document.createElement("h3");
+        heading.textContent = title;
+        el.appendChild(heading);
+        for (const line of lines) {
+          const p = document.createElement("p");
+          p.className = line.className ?? "meta";
+          p.textContent = line.text;
+          el.appendChild(p);
+        }
+        return el;
+      }
+
+      function documentId(doc) {
+        return doc?.$id?.toString?.() ?? doc?.$id ?? doc?.id ?? "unknown";
+      }
+
+      function ownerId(doc) {
+        return doc?.$ownerId?.toString?.() ?? doc?.$ownerId ?? "unknown";
+      }
+
+      function normalizeResults(raw) {
+        if (Array.isArray(raw)) return raw;
+        if (Array.isArray(raw?.documents)) return raw.documents;
+        if (Array.isArray(raw?.resultSet)) return raw.resultSet;
+        return [];
+      }
+
+      async function listSubmissions(sdk, severity) {
+        const where = severity ? [["severity", "==", severity]] : undefined;
+        const raw = await sdk.documents.query({
+          dataContract: CONTRACT_ID,
+          documentTypeName: DOC_TYPE,
+          where,
+          orderBy: [["$createdAt", "desc"]],
+          limit: 25,
+        });
+        return normalizeResults(raw);
+      }
+
+      async function refreshSubmissions(sdk) {
+        submissionsResultEl.replaceChildren(statusLine("Querying..."));
+        try {
+          const submissions = await listSubmissions(sdk, severityFilter.value);
+          if (submissions.length === 0) {
+            submissionsResultEl.replaceChildren(
+              statusLine("No submissions found."),
+            );
+            return;
+          }
+
+          submissionsResultEl.replaceChildren(
+            ...submissions.map((submission) =>
+              itemEl(submission.title ?? "Untitled submission", [
+                {
+                  text: `${submission.severity ?? "unknown"} / ${submission.component ?? "unknown component"}`,
+                },
+                { text: `ID: ${documentId(submission)}` },
+                { text: `Owner: ${ownerId(submission)}` },
+                {
+                  text: submission.description ?? "",
+                  className: "description",
+                },
+              ]),
+            ),
+          );
+        } catch (err) {
+          submissionsResultEl.replaceChildren(
+            statusLine(`Error: ${err?.message ?? err}`, "error"),
+          );
+        }
+      }
+
+      async function refreshPanels(sdk) {
+        panelsResultEl.replaceChildren(statusLine("Loading panels..."));
+        try {
+          const [accessInfo, accessMembers, revocationInfo, revocationMembers] =
+            await Promise.all([
+              sdk.group.info(CONTRACT_ID, ACCESS_GROUP_POSITION),
+              sdk.group.members(CONTRACT_ID, ACCESS_GROUP_POSITION),
+              sdk.group.info(CONTRACT_ID, REVOCATION_GROUP_POSITION),
+              sdk.group.members(CONTRACT_ID, REVOCATION_GROUP_POSITION),
+            ]);
+
+          panelsResultEl.replaceChildren(
+            itemEl("Access panel", [
+              { text: `Position: ${ACCESS_GROUP_POSITION}` },
+              { text: `Required power: ${accessInfo?.requiredPower ?? 2}` },
+              { text: `Members: ${JSON.stringify(accessMembers)}` },
+            ]),
+            itemEl("Revocation panel", [
+              { text: `Position: ${REVOCATION_GROUP_POSITION}` },
+              { text: `Required power: ${revocationInfo?.requiredPower ?? 3}` },
+              { text: `Members: ${JSON.stringify(revocationMembers)}` },
+            ]),
+          );
+        } catch (err) {
+          panelsResultEl.replaceChildren(
+            statusLine(`Error: ${err?.message ?? err}`, "error"),
+          );
+        }
+      }
+
+      async function main() {
+        if (!CONTRACT_ID) {
+          const message =
+            "Set CONTRACT_ID in public/sift-lite.html after publishing a Sift contract.";
+          submissionsResultEl.replaceChildren(statusLine(message));
+          panelsResultEl.replaceChildren(statusLine(message));
+          return;
+        }
+
+        const sdk = await DashSDK.create({ network: "testnet" });
+        refreshSubmissionsBtn.disabled = false;
+        refreshPanelsBtn.disabled = false;
+        refreshSubmissionsBtn.addEventListener("click", () =>
+          refreshSubmissions(sdk),
+        );
+        refreshPanelsBtn.addEventListener("click", () => refreshPanels(sdk));
+        severityFilter.addEventListener("change", () =>
+          refreshSubmissions(sdk),
+        );
+
+        await Promise.all([refreshSubmissions(sdk), refreshPanels(sdk)]);
+      }
+
+      main().catch((err) => {
+        submissionsResultEl.replaceChildren(
+          statusLine(`Connection failed: ${err?.message ?? err}`, "error"),
+        );
+        panelsResultEl.replaceChildren(
+          statusLine(`Connection failed: ${err?.message ?? err}`, "error"),
+        );
+      });
+    </script>
+  </body>
+</html>

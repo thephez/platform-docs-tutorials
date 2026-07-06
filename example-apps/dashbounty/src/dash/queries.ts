@@ -1,36 +1,37 @@
 /**
- * Read queries over the bounty data contract's `report` document type.
+ * Read queries over the Sift contract's `submission` document type.
  *
- * normalizeReports() hides the three possible shapes the SDK may return
- * (Array, Map, or plain object) so UI code always sees a plain array of
- * typed Report objects.
+ * normalizeSubmissions() hides the three possible shapes the SDK may return
+ * (Array, Map, or plain object) so UI code always sees a plain array.
  *
  * SDK method: sdk.documents.query({ dataContractId, documentTypeName, where?, orderBy?, limit })
  */
 import type { Logger } from "./logger.js";
 import type {
-  DashReportQueryDocument,
-  DashReportQueryResults,
   DashSdk,
+  DashSubmissionQueryDocument,
+  DashSubmissionQueryResults,
 } from "./types";
-import type { ReportSeverity } from "./submitReport";
+import type { SubmissionSeverity } from "./submitSubmission";
 
-// Platform caps document queries at 100 results per request.
 const MAX_QUERY_LIMIT = 100;
 
-export interface Report {
+export interface Submission {
   id: string;
   ownerId: string;
   revision: bigint | number | string;
   title: string;
-  severity: ReportSeverity;
+  severity: SubmissionSeverity;
   component: string;
   description: string;
   pocHash?: string;
   createdAt?: bigint | number | string;
 }
 
-function toReport(id: string | null, raw: DashReportQueryDocument): Report {
+function toSubmission(
+  id: string | null,
+  raw: DashSubmissionQueryDocument,
+): Submission {
   const j: Record<string, unknown> =
     typeof raw?.toJSON === "function" ? raw.toJSON() : raw;
   return {
@@ -38,7 +39,7 @@ function toReport(id: string | null, raw: DashReportQueryDocument): Report {
     ownerId: j.$ownerId as string,
     revision: (j.$revision as bigint | number | string) ?? 1n,
     title: j.title as string,
-    severity: j.severity as ReportSeverity,
+    severity: j.severity as SubmissionSeverity,
     component: j.component as string,
     description: j.description as string,
     pocHash: j.pocHash as string | undefined,
@@ -46,11 +47,13 @@ function toReport(id: string | null, raw: DashReportQueryDocument): Report {
   };
 }
 
-export function normalizeReports(results: DashReportQueryResults): Report[] {
-  if (Array.isArray(results)) return results.map((d) => toReport(null, d));
+export function normalizeSubmissions(
+  results: DashSubmissionQueryResults,
+): Submission[] {
+  if (Array.isArray(results)) return results.map((d) => toSubmission(null, d));
   const entries =
     results instanceof Map ? Object.fromEntries(results) : results;
-  return Object.entries(entries).map(([id, d]) => toReport(id, d));
+  return Object.entries(entries).map(([id, d]) => toSubmission(id, d));
 }
 
 interface BaseParams {
@@ -60,17 +63,17 @@ interface BaseParams {
   log?: Logger;
 }
 
-export async function listReportsByOwner({
+export async function listSubmissionsByOwner({
   sdk,
   contractId,
   ownerId,
   limit = MAX_QUERY_LIMIT,
   log,
-}: BaseParams & { ownerId: string }): Promise<Report[]> {
-  log?.("Loading your reports…");
+}: BaseParams & { ownerId: string }): Promise<Submission[]> {
+  log?.("Loading your submissions...");
   const results = await sdk.documents.query({
     dataContractId: contractId,
-    documentTypeName: "report",
+    documentTypeName: "submission",
     where: [["$ownerId", "==", ownerId]],
     orderBy: [
       ["$ownerId", "asc"],
@@ -78,22 +81,22 @@ export async function listReportsByOwner({
     ],
     limit,
   });
-  const reports = normalizeReports(results);
-  log?.(`Found ${reports.length} report(s).`);
-  return reports;
+  const submissions = normalizeSubmissions(results);
+  log?.(`Found ${submissions.length} submission(s).`);
+  return submissions;
 }
 
-export async function listReportsBySeverity({
+export async function listSubmissionsBySeverity({
   sdk,
   contractId,
   severity,
   limit = MAX_QUERY_LIMIT,
   log,
-}: BaseParams & { severity: ReportSeverity }): Promise<Report[]> {
-  log?.(`Loading ${severity} reports…`);
+}: BaseParams & { severity: SubmissionSeverity }): Promise<Submission[]> {
+  log?.(`Loading ${severity} submissions...`);
   const results = await sdk.documents.query({
     dataContractId: contractId,
-    documentTypeName: "report",
+    documentTypeName: "submission",
     where: [["severity", "==", severity]],
     orderBy: [
       ["severity", "asc"],
@@ -101,22 +104,22 @@ export async function listReportsBySeverity({
     ],
     limit,
   });
-  const reports = normalizeReports(results);
-  log?.(`Found ${reports.length} ${severity} report(s).`);
-  return reports;
+  const submissions = normalizeSubmissions(results);
+  log?.(`Found ${submissions.length} ${severity} submission(s).`);
+  return submissions;
 }
 
-export async function listReportsByComponent({
+export async function listSubmissionsByComponent({
   sdk,
   contractId,
   component,
   limit = MAX_QUERY_LIMIT,
   log,
-}: BaseParams & { component: string }): Promise<Report[]> {
-  log?.(`Loading reports for "${component}"…`);
+}: BaseParams & { component: string }): Promise<Submission[]> {
+  log?.(`Loading submissions for "${component}"...`);
   const results = await sdk.documents.query({
     dataContractId: contractId,
-    documentTypeName: "report",
+    documentTypeName: "submission",
     where: [["component", "==", component]],
     orderBy: [
       ["component", "asc"],
@@ -124,43 +127,43 @@ export async function listReportsByComponent({
     ],
     limit,
   });
-  const reports = normalizeReports(results);
-  log?.(`Found ${reports.length} report(s) for "${component}".`);
-  return reports;
+  const submissions = normalizeSubmissions(results);
+  log?.(`Found ${submissions.length} submission(s) for "${component}".`);
+  return submissions;
 }
 
-export async function listAllReports({
+export async function listAllSubmissions({
   sdk,
   contractId,
   limit = MAX_QUERY_LIMIT,
   log,
-}: BaseParams): Promise<Report[]> {
-  log?.("Loading all reports…");
+}: BaseParams): Promise<Submission[]> {
+  log?.("Loading all submissions...");
   const results = await sdk.documents.query({
     dataContractId: contractId,
-    documentTypeName: "report",
+    documentTypeName: "submission",
     limit,
   });
-  const reports = normalizeReports(results);
-  log?.(`Found ${reports.length} report(s) total.`);
-  return reports;
+  const submissions = normalizeSubmissions(results);
+  log?.(`Found ${submissions.length} submission(s) total.`);
+  return submissions;
 }
 
-export async function findReportById({
+export async function findSubmissionById({
   sdk,
   contractId,
-  reportId,
+  submissionId,
   log,
 }: {
   sdk: DashSdk;
   contractId: string;
-  reportId: string;
+  submissionId: string;
   log?: Logger;
-}): Promise<Report | undefined> {
-  const doc = await sdk.documents.get(contractId, "report", reportId);
+}): Promise<Submission | undefined> {
+  const doc = await sdk.documents.get(contractId, "submission", submissionId);
   if (!doc) {
-    log?.(`Report ${reportId} not found.`);
+    log?.(`Submission ${submissionId} not found.`);
     return undefined;
   }
-  return toReport(reportId, doc as DashReportQueryDocument);
+  return toSubmission(submissionId, doc as DashSubmissionQueryDocument);
 }

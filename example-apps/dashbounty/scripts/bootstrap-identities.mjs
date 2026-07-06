@@ -1,5 +1,5 @@
 // One-time setup: register 4 identities from a single PLATFORM_MNEMONIC —
-// identity index 0 is the researcher, indices 1-3 are the Triage Panel.
+// identity index 0 is the submitter, indices 1-3 are the panels.
 // Different identityIndex values are separate DIP-13 derivation paths
 // (m/9'/{coin}'/5'/0'/0'/{identityIndex}'/{keyIndex}'), so each index
 // produces a genuinely distinct, independently-registerable identity from
@@ -52,7 +52,7 @@ loadEnv({ path: resolve(here, "../../../.env") });
 const { setupDashClient, IdentityKeyManager } =
   await import("../../../setupDashClient.mjs");
 
-const ROLES = ["researcher", "panelist-1", "panelist-2", "panelist-3"];
+const ROLES = ["submitter", "panelist-1", "panelist-2", "panelist-3"];
 const ENV_KEYS = [
   null,
   "VITE_PANELIST_1_ID",
@@ -65,10 +65,8 @@ const ENV_KEYS = [
 // demo minimum below.
 const CREATION_DEPOSIT_CREDITS = 5_000_000n;
 
-// Per-role balance floors for the DashBounty demo. Owner (index 0) has to
-// afford contract publish + at least one roster rotation (publish alone
-// consumed ~25,000,100,000 credits during testnet proof; leaving generous
-// headroom for a rotation and one report submission). Panelists have to
+// Per-role balance floors for the Sift demo. Owner (index 0) has to
+// afford contract publish and at least one submission. Panelists have to
 // afford several group co-signatures (~189,793,800 credits per freeze
 // co-sign observed on testnet); 1,000,000,000 credits fits 5+ co-signs.
 const RESEARCHER_MIN_CREDITS = 60_000_000_000n;
@@ -299,5 +297,5 @@ for (let identityIndex = 0; identityIndex < 4; identityIndex += 1) {
 
 console.log(`\nWrote panelist IDs to ${envPath}`);
 console.log(
-  "Sign in to DashBounty with identityIndex 0 to file reports, or 1/2/3 to act as a panelist.",
+  "Sign in to Sift with identityIndex 0 to file submissions, or 1/2/3 to act as a panelist.",
 );

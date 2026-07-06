@@ -7,15 +7,14 @@
  */
 import type { DashSdk } from "./types";
 
-const STORAGE_KEY = "dashbounty.contractId";
+const STORAGE_KEY = "sift.contractId";
 
 /**
  * Default contract ID baked into the tutorial so browse-only mode works on
- * a fresh machine without any setup. Owned by identity index 0 (see
- * scripts/bootstrap-identities.mjs), Triage Panel is identity indices 1-3.
+ * a fresh machine without any setup. Sift is still a PoC, so this starts
+ * null until a fresh submission-based contract is published.
  */
-export const DEFAULT_CONTRACT_ID: string | null =
-  "AZKQEAN2voBiLVHkAamMVjYLSxip73DJ4eks8jkQ9mEi";
+export const DEFAULT_CONTRACT_ID: string | null = null;
 
 export function loadStoredContractId(): string | null {
   return localStorage.getItem(STORAGE_KEY) ?? DEFAULT_CONTRACT_ID;

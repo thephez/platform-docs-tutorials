@@ -1,12 +1,12 @@
 /**
- * Shared Playwright fixtures for DashBounty E2E tests.
+ * Shared Playwright fixtures for Sift E2E tests.
  *
  * These run against real Dash Platform testnet. No mocks — the app boots
  * normally and connects via @dashevo/evo-sdk.
  *
  * Two independent gates:
  *   HAS_MNEMONIC — PLATFORM_MNEMONIC is set. Enough for single-identity
- *     flows (submit a report as the researcher).
+ *     flows (submit a Sift submission as the submitter).
  *   HAS_PANEL_IDENTITIES — all 4 identity IDs from
  *     scripts/bootstrap-identities.mjs are present. Required for the group
  *     2-of-3 signing flow, which needs a genuinely different signing

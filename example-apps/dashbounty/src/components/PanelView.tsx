@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { CopyableId } from "./CopyableId";
+import { groupPositionForAction, type PanelActionKind } from "../dash/contract";
 import { destroyFrozenCredit } from "../dash/destroyFrozenCredit";
 import {
   describeGroupAction,
@@ -11,13 +12,18 @@ import {
 } from "../dash/groupActions";
 import { freezeCredit } from "../dash/freezeCredit";
 import { errorMessage } from "../dash/logger";
-import { fetchPanelInfo, isPanelMember, type PanelInfo } from "../dash/panel";
+import {
+  fetchPanels,
+  isPanelMember,
+  panelKindForAction,
+  type PanelInfo,
+} from "../dash/panel";
 import { unfreezeCredit } from "../dash/unfreezeCredit";
 import { useSession } from "../session/useSession";
 
-type ProposeKind = "freeze" | "unfreeze" | "destroy";
+type UiPendingAction = PendingAction & { panel: PanelInfo };
 
-function actionKindFromName(eventName: string): ProposeKind | null {
+function actionKindFromName(eventName: string): PanelActionKind | null {
   const lower = eventName.toLowerCase();
   if (lower.includes("unfreeze")) return "unfreeze";
   if (lower.includes("freeze")) return "freeze";
@@ -25,8 +31,14 @@ function actionKindFromName(eventName: string): ProposeKind | null {
   return null;
 }
 
+function actionLabel(kind: PanelActionKind): string {
+  if (kind === "freeze") return "Suspend access";
+  if (kind === "unfreeze") return "Restore access";
+  return "Revoke suspended tokens";
+}
+
 async function runAction(
-  kind: ProposeKind,
+  kind: PanelActionKind,
   args: {
     sdk: NonNullable<ReturnType<typeof useSession>["sdk"]>;
     keyManager: NonNullable<ReturnType<typeof useSession>["keyManager"]>;
@@ -34,6 +46,7 @@ async function runAction(
     groupPosition: number;
     frozenIdentityId: string;
     actionId?: string;
+    publicNote?: string;
     log: ReturnType<typeof useSession>["log"];
   },
 ) {
@@ -44,59 +57,68 @@ async function runAction(
 
 export function PanelView() {
   const session = useSession();
-  const [panel, setPanel] = useState<PanelInfo | null>(null);
-  const [pending, setPending] = useState<PendingAction[]>([]);
+  const [panels, setPanels] = useState<PanelInfo[]>([]);
+  const [pending, setPending] = useState<UiPendingAction[]>([]);
   const [signerProgress, setSignerProgress] = useState<
     Map<string, ActionSignerProgress>
   >(new Map());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Propose form
-  const [proposeKind, setProposeKind] = useState<ProposeKind>("freeze");
+  const [proposeKind, setProposeKind] = useState<PanelActionKind>("freeze");
   const [targetIdentityId, setTargetIdentityId] = useState("");
   const [note, setNote] = useState("");
-
-  // Co-sign target confirmation, keyed by actionId. `event.toJSON().data`'s
-  // shape isn't documented in the SDK bindings (typed `unknown`) — rather
-  // than guess at an unverified payload, panel members confirm the target
-  // identity themselves (which they'd know from out-of-band coordination
-  // with the proposer) when co-signing.
   const [cosignTargets, setCosignTargets] = useState<Record<string, string>>(
     {},
   );
+
+  const panelsByKind = useMemo(
+    () => new Map(panels.map((panel) => [panel.kind, panel])),
+    [panels],
+  );
+  const proposePanel = panelsByKind.get(panelKindForAction(proposeKind));
+  const canPropose =
+    proposePanel && session.identityId
+      ? isPanelMember(proposePanel, session.identityId)
+      : false;
 
   async function refresh() {
     if (!session.sdk || !session.contractId) return;
     setError(null);
     try {
-      // fetchPanelInfo resolves the token's CURRENT main control group
-      // position (dynamic after a roster rotation) — every group query and
-      // action below must target that same position.
-      const info = await fetchPanelInfo({
+      const nextPanels = await fetchPanels({
         sdk: session.sdk,
         contractId: session.contractId,
       });
-      setPanel(info);
-      const actions = await listPendingActions({
-        sdk: session.sdk,
-        contractId: session.contractId,
-        groupPosition: info.groupPosition,
-      });
-      setPending(actions);
+      setPanels(nextPanels);
+
+      const pendingWithPanels: UiPendingAction[] = [];
       const progress = new Map<string, ActionSignerProgress>();
       await Promise.all(
-        actions.map(async (action) => {
-          const p = await listActionSigners({
+        nextPanels.map(async (panel) => {
+          const actions = await listPendingActions({
             sdk: session.sdk!,
             contractId: session.contractId!,
-            groupPosition: info.groupPosition,
-            actionId: action.actionId,
-            requiredPower: info.requiredPower,
+            groupPosition: panel.groupPosition,
           });
-          progress.set(action.actionId, p);
+          pendingWithPanels.push(
+            ...actions.map((action) => ({ ...action, panel })),
+          );
+          await Promise.all(
+            actions.map(async (action) => {
+              const p = await listActionSigners({
+                sdk: session.sdk!,
+                contractId: session.contractId!,
+                groupPosition: panel.groupPosition,
+                actionId: action.actionId,
+                requiredPower: panel.requiredPower,
+              });
+              progress.set(action.actionId, p);
+            }),
+          );
         }),
       );
+      setPending(pendingWithPanels);
       setSignerProgress(progress);
     } catch (err) {
       setError(errorMessage(err));
@@ -110,15 +132,9 @@ export function PanelView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.sdk, session.contractId]);
 
-  const member =
-    panel && session.identityId
-      ? isPanelMember(panel, session.identityId)
-      : false;
-
   async function handlePropose(event: React.FormEvent) {
     event.preventDefault();
-    if (!session.sdk || !session.keyManager || !session.contractId || !panel)
-      return;
+    if (!session.sdk || !session.keyManager || !session.contractId) return;
     setBusy(true);
     setError(null);
     try {
@@ -126,8 +142,9 @@ export function PanelView() {
         sdk: session.sdk,
         keyManager: session.keyManager,
         contractId: session.contractId,
-        groupPosition: panel.groupPosition,
+        groupPosition: groupPositionForAction(proposeKind),
         frozenIdentityId: targetIdentityId.trim(),
+        publicNote: note.trim() || undefined,
         log: session.log,
       });
       setTargetIdentityId("");
@@ -140,9 +157,8 @@ export function PanelView() {
     }
   }
 
-  async function handleCosign(action: PendingAction) {
-    if (!session.sdk || !session.keyManager || !session.contractId || !panel)
-      return;
+  async function handleCosign(action: UiPendingAction) {
+    if (!session.sdk || !session.keyManager || !session.contractId) return;
     const kind = actionKindFromName(action.eventName);
     if (!kind) {
       setError(`Unrecognized action type: ${action.eventName}`);
@@ -160,7 +176,7 @@ export function PanelView() {
         sdk: session.sdk,
         keyManager: session.keyManager,
         contractId: session.contractId,
-        groupPosition: panel.groupPosition,
+        groupPosition: action.panel.groupPosition,
         frozenIdentityId,
         actionId: action.actionId,
         log: session.log,
@@ -174,9 +190,7 @@ export function PanelView() {
   }
 
   if (!session.contractId) {
-    return (
-      <div className="notice info">Configure a bounty contract first.</div>
-    );
+    return <div className="notice info">Configure a Sift contract first.</div>;
   }
 
   return (
@@ -184,33 +198,41 @@ export function PanelView() {
       {error && <div className="notice error">{error}</div>}
 
       <div className="card">
-        <h3>Triage Panel</h3>
-        {panel ? (
-          <>
-            <p className="muted">
-              {panel.members.size} member(s), requires {panel.requiredPower} of
-              them to act. Active group position: {panel.groupPosition}.
-            </p>
-            <ul>
-              {[...panel.members.keys()].map((id) => (
-                <li key={id}>
-                  <CopyableId id={id} />
-                  {id === session.identityId && " (you)"}
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : (
-          <p className="muted">Loading…</p>
-        )}
-        {!member && session.status === "authenticated" && (
-          <p className="notice info">
-            You are signed in but are not a member of this Triage Panel.
-          </p>
-        )}
+        <h3>Review Panel</h3>
+        <p className="muted">
+          Access actions require the 2-of-3 Access Panel. Revoking suspended
+          tokens requires the stricter 3-of-3 Revocation Panel.
+        </p>
+        <div className="list">
+          {panels.map((panel) => (
+            <div key={panel.kind} className="card">
+              <div className="row between">
+                <strong>{panel.label}</strong>
+                <span className="muted">
+                  {panel.requiredPower}/{panel.members.size} required · group{" "}
+                  {panel.groupPosition}
+                </span>
+              </div>
+              <ul>
+                {[...panel.members.keys()].map((id) => (
+                  <li key={id}>
+                    <CopyableId id={id} />
+                    {id === session.identityId && " (you)"}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
       </div>
 
-      {member && (
+      {session.status === "authenticated" && !canPropose && (
+        <p className="notice info">
+          You are signed in but are not a member of the selected action's panel.
+        </p>
+      )}
+
+      {canPropose && (
         <div className="card">
           <h3>Propose an action</h3>
           <form onSubmit={handlePropose}>
@@ -221,12 +243,12 @@ export function PanelView() {
                   id="propose-kind"
                   value={proposeKind}
                   onChange={(event) =>
-                    setProposeKind(event.target.value as ProposeKind)
+                    setProposeKind(event.target.value as PanelActionKind)
                   }
                 >
-                  <option value="freeze">Freeze</option>
-                  <option value="unfreeze">Unfreeze</option>
-                  <option value="destroy">Slash (destroy frozen)</option>
+                  <option value="freeze">Suspend access</option>
+                  <option value="unfreeze">Restore access</option>
+                  <option value="destroy">Revoke suspended tokens</option>
                 </select>
               </div>
               <div className="field">
@@ -248,7 +270,7 @@ export function PanelView() {
               />
             </div>
             <button type="submit" disabled={busy}>
-              Propose
+              Propose {actionLabel(proposeKind)}
             </button>
           </form>
         </div>
@@ -262,6 +284,9 @@ export function PanelView() {
             const alreadySigned = session.identityId
               ? (progress?.hasSigned(session.identityId) ?? false)
               : false;
+            const member = session.identityId
+              ? isPanelMember(action.panel, session.identityId)
+              : false;
             const pct = progress
               ? Math.min(
                   100,
@@ -273,7 +298,8 @@ export function PanelView() {
                 <div className="row between">
                   <strong>{describeGroupAction(action.eventName)}</strong>
                   <span className="muted row">
-                    proposed by <CopyableId id={action.proposerId} len={6} />
+                    {action.panel.label} · proposed by{" "}
+                    <CopyableId id={action.proposerId} len={6} />
                   </span>
                 </div>
                 {progress && (
@@ -304,17 +330,19 @@ export function PanelView() {
                       disabled={busy}
                       onClick={() => handleCosign(action)}
                     >
-                      Sign
+                      Co-sign
                     </button>
                   </div>
                 )}
-                {alreadySigned && (
-                  <p className="muted">You already signed this.</p>
+                {member && alreadySigned && (
+                  <p className="muted">You have already signed this action.</p>
                 )}
               </div>
             );
           })}
-          {pending.length === 0 && <p className="muted">No pending actions.</p>}
+          {pending.length === 0 && (
+            <p className="muted">No pending panel actions.</p>
+          )}
         </div>
       </div>
     </div>

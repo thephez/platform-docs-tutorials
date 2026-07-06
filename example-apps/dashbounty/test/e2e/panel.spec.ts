@@ -6,19 +6,19 @@ import {
   loginAs,
 } from "./fixtures";
 
-// The only spec that exercises the group 2-of-3 propose/co-sign flow for
+// The only spec that exercises the access group 2-of-3 propose/co-sign flow for
 // real. Requires 4 distinct on-chain identities (see
 // scripts/bootstrap-identities.mjs) — a genuinely different signing
 // identity for the second signature, not the same key re-signing. Gated
 // behind HAS_PANEL_IDENTITIES rather than HAS_MNEMONIC so casual
 // contributors/CI aren't blocked by the heavier 4-identity setup cost.
 //
-// Freeze → unfreeze round-trip on panelist 2's own identity, ending back at
-// baseline (unfrozen) — reversible, matching every sibling app's e2e write
+// Suspend → restore round-trip on panelist 2's own identity, ending back at
+// baseline — reversible, matching every sibling app's e2e write
 // spec philosophy (dashmint-lab's SetPrice list→update→unlist round-trip).
-// Destroy (an irreversible slash) is deliberately excluded from automated
+// Revocation (irreversible destroyFrozen) is deliberately excluded from automated
 // e2e for the same reason marketplace/burn writes are excluded elsewhere.
-test.describe("Triage Panel group signing (2-of-3, auth-gated)", () => {
+test.describe("Sift Review Panel group signing (2-of-3, auth-gated)", () => {
   test.describe.configure({ mode: "serial" });
 
   test.skip(
@@ -28,68 +28,64 @@ test.describe("Triage Panel group signing (2-of-3, auth-gated)", () => {
 
   test.setTimeout(300_000);
 
-  test("panelist 1 proposes a freeze, panelist 3 co-signs, then unfreezes to restore baseline", async ({
+  test("panelist 1 proposes a suspension, panelist 3 co-signs, then restores baseline", async ({
     page,
   }) => {
-    const [, target] = PANELIST_IDS; // panelist 2's identity is the freeze target
+    const [, target] = PANELIST_IDS; // panelist 2's identity is the suspension target
 
-    // ── Step 1: panelist 1 proposes a freeze on panelist 2 ─────────────────
+    // Step 1: panelist 1 proposes a suspension on panelist 2
     await loginAs(page, 1);
-    await page.getByRole("button", { name: "Triage panel" }).click();
-    await expect(page.getByText(/requires 2 of them to act/)).toBeVisible({
+    await page.getByRole("button", { name: "Review panel" }).click();
+    await expect(page.getByText(/Access actions require/i)).toBeVisible({
       timeout: 30_000,
     });
 
     await page.getByLabel("Action").selectOption("freeze");
     await page.getByLabel("Target identity ID").fill(target);
-    await page.getByRole("button", { name: "Propose" }).click();
+    await page.getByRole("button", { name: /Propose Suspend access/ }).click();
     await expect(page.getByText(/1\/2 power signed/)).toBeVisible({
       timeout: 60_000,
     });
 
-    // ── Step 2: panelist 3 discovers the pending action and co-signs ───────
+    // Step 2: panelist 3 discovers the pending action and co-signs
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByRole("button", { name: "Sign out" }).click();
     await loginAs(page, 3);
-    await page.getByRole("button", { name: "Triage panel" }).click();
+    await page.getByRole("button", { name: "Review panel" }).click();
 
-    const freezeCard = page
-      .locator(".card", { hasText: "Freeze proposal" })
+    const suspendCard = page
+      .locator(".card", { hasText: "Suspend access proposal" })
       .first();
-    await expect(freezeCard).toBeVisible({ timeout: 30_000 });
-    await freezeCard
+    await expect(suspendCard).toBeVisible({ timeout: 30_000 });
+    await suspendCard
       .getByPlaceholder("Confirm target identity ID")
       .fill(target);
-    await freezeCard.getByRole("button", { name: "Sign" }).click();
+    await suspendCard.getByRole("button", { name: "Co-sign" }).click();
 
-    // ── Verify: panelist 2 shows as frozen in the panel member list is not
-    // directly exposed, but the pending action disappearing (CLOSED) plus a
-    // reports-view "Reporter frozen" badge would confirm it. Simplest
-    // reliable signal here: the pending freeze card is gone.
-    await expect(freezeCard).toBeHidden({ timeout: 60_000 });
+    await expect(suspendCard).toBeHidden({ timeout: 60_000 });
 
-    // ── Step 3: panelist 3 immediately proposes the reversing unfreeze ─────
+    // Step 3: panelist 3 immediately proposes the restore action
     await page.getByLabel("Action").selectOption("unfreeze");
     await page.getByLabel("Target identity ID").fill(target);
-    await page.getByRole("button", { name: "Propose" }).click();
+    await page.getByRole("button", { name: /Propose Restore access/ }).click();
     await expect(page.getByText(/1\/2 power signed/)).toBeVisible({
       timeout: 60_000,
     });
 
-    // ── Step 4: panelist 1 co-signs the unfreeze, restoring baseline ───────
+    // Step 4: panelist 1 co-signs the restore action
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByRole("button", { name: "Sign out" }).click();
     await loginAs(page, 1);
-    await page.getByRole("button", { name: "Triage panel" }).click();
+    await page.getByRole("button", { name: "Review panel" }).click();
 
-    const unfreezeCard = page
-      .locator(".card", { hasText: "Unfreeze proposal" })
+    const restoreCard = page
+      .locator(".card", { hasText: "Restore access proposal" })
       .first();
-    await expect(unfreezeCard).toBeVisible({ timeout: 30_000 });
-    await unfreezeCard
+    await expect(restoreCard).toBeVisible({ timeout: 30_000 });
+    await restoreCard
       .getByPlaceholder("Confirm target identity ID")
       .fill(target);
-    await unfreezeCard.getByRole("button", { name: "Sign" }).click();
-    await expect(unfreezeCard).toBeHidden({ timeout: 60_000 });
+    await restoreCard.getByRole("button", { name: "Co-sign" }).click();
+    await expect(restoreCard).toBeHidden({ timeout: 60_000 });
   });
 });

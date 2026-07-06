@@ -3,17 +3,17 @@ import { Toaster } from "sonner";
 
 import { AccountView } from "./components/AccountView";
 import { AppNotices } from "./components/AppNotices";
-import { MyReportsView } from "./components/MyReportsView";
+import { MySubmissionsView } from "./components/MySubmissionsView";
 import { PanelView } from "./components/PanelView";
-import { ReportsView } from "./components/ReportsView";
-import { RosterView } from "./components/RosterView";
-import { SubmitReportForm } from "./components/SubmitReportForm";
+import { PanelsView } from "./components/PanelsView";
+import { QueueView } from "./components/QueueView";
+import { SubmitSubmissionForm } from "./components/SubmitSubmissionForm";
 import { TopNav, type View } from "./components/TopNav";
 import { useSession } from "./session/useSession";
 
 export default function App() {
   const session = useSession();
-  const [view, setView] = useState<View>("reports");
+  const [view, setView] = useState<View>("queue");
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -36,12 +36,14 @@ export default function App() {
         />
 
         {view === "submit" && (
-          <SubmitReportForm onSubmitted={() => setRefreshKey((v) => v + 1)} />
+          <SubmitSubmissionForm
+            onSubmitted={() => setRefreshKey((v) => v + 1)}
+          />
         )}
-        {view === "reports" && <ReportsView key={refreshKey} />}
-        {view === "my-reports" && <MyReportsView />}
+        {view === "queue" && <QueueView key={refreshKey} />}
+        {view === "my-submissions" && <MySubmissionsView />}
         {view === "panel" && <PanelView />}
-        {view === "roster" && <RosterView />}
+        {view === "panels" && <PanelsView />}
         {view === "account" && <AccountView />}
       </div>
       <footer className="app-footer">

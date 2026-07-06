@@ -1,7 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-// panel.ts pulls constants from contract.ts, which statically imports the
-// SDK — mock the whole module surface contract.ts touches.
 vi.mock("@dashevo/evo-sdk", () => ({
   DataContract: class DataContract {},
   Group: class Group {
@@ -28,31 +26,17 @@ vi.mock("@dashevo/evo-sdk", () => ({
   TokenKeepsHistoryRules: class TokenKeepsHistoryRules {},
   TokenMarketplaceRules: class TokenMarketplaceRules {},
   TokenTradeMode: { NotTradeable: () => ({ type: "NotTradeable" }) },
-  TokenConfigurationChangeItem: {
-    MainControlGroupItem: (position: number) => ({
-      type: "MainControlGroupItem",
-      position,
-    }),
-  },
 }));
 
 function makeSdk({
-  mainControlGroup,
   groupInfo,
 }: {
-  mainControlGroup?: number;
   groupInfo?: Record<
     number,
     { members: Map<string, number>; requiredPower: number }
   >;
 }) {
   return {
-    contracts: {
-      fetch: vi.fn().mockResolvedValue({
-        version: 1,
-        tokens: { 0: { mainControlGroup } },
-      }),
-    },
     group: {
       info: vi.fn(
         async (_contractId: string, position: number) => groupInfo?.[position],
@@ -65,58 +49,86 @@ function makeSdk({
   } as never;
 }
 
-describe("fetchActivePanelPosition", () => {
-  it("resolves the token's current mainControlGroup from the contract", async () => {
-    const { fetchActivePanelPosition } = await import("../src/dash/panel");
-    const position = await fetchActivePanelPosition({
-      sdk: makeSdk({ mainControlGroup: 2 }),
-      contractId: "contract-1",
-    });
-    expect(position).toBe(2);
-  });
-
-  it("falls back to the founding group 0 when the config exposes none", async () => {
-    const { fetchActivePanelPosition } = await import("../src/dash/panel");
-    const position = await fetchActivePanelPosition({
-      sdk: makeSdk({}),
-      contractId: "contract-1",
-    });
-    expect(position).toBe(0);
-  });
-});
-
 describe("fetchPanelInfo", () => {
-  it("reads the group at the ACTIVE position, not the founding group 0", async () => {
+  it("reads the explicit access group", async () => {
     const { fetchPanelInfo } = await import("../src/dash/panel");
     const info = await fetchPanelInfo({
       sdk: makeSdk({
-        mainControlGroup: 1,
         groupInfo: {
-          0: { members: new Map([["old-panelist", 1]]), requiredPower: 2 },
-          1: { members: new Map([["new-panelist", 1]]), requiredPower: 2 },
+          0: { members: new Map([["access-panelist", 1]]), requiredPower: 2 },
+          1: {
+            members: new Map([["revocation-panelist", 1]]),
+            requiredPower: 3,
+          },
+        },
+      }),
+      contractId: "contract-1",
+      kind: "access",
+    });
+
+    expect(info.groupPosition).toBe(0);
+    expect(info.requiredPower).toBe(2);
+    expect([...info.members.keys()]).toEqual(["access-panelist"]);
+  });
+
+  it("reads the explicit revocation group", async () => {
+    const { fetchPanelInfo } = await import("../src/dash/panel");
+    const info = await fetchPanelInfo({
+      sdk: makeSdk({
+        groupInfo: {
+          0: { members: new Map([["access-panelist", 1]]), requiredPower: 2 },
+          1: {
+            members: new Map([["revocation-panelist", 1]]),
+            requiredPower: 3,
+          },
+        },
+      }),
+      contractId: "contract-1",
+      kind: "revocation",
+    });
+
+    expect(info.groupPosition).toBe(1);
+    expect(info.requiredPower).toBe(3);
+    expect([...info.members.keys()]).toEqual(["revocation-panelist"]);
+  });
+});
+
+describe("fetchPanels", () => {
+  it("returns both Sift panels", async () => {
+    const { fetchPanels } = await import("../src/dash/panel");
+    const panels = await fetchPanels({
+      sdk: makeSdk({
+        groupInfo: {
+          0: { members: new Map([["a", 1]]), requiredPower: 2 },
+          1: { members: new Map([["a", 1]]), requiredPower: 3 },
         },
       }),
       contractId: "contract-1",
     });
 
-    expect(info.groupPosition).toBe(1);
-    expect([...info.members.keys()]).toEqual(["new-panelist"]);
+    expect(panels.map((panel) => panel.kind)).toEqual(["access", "revocation"]);
+    expect(panels.map((panel) => panel.requiredPower)).toEqual([2, 3]);
   });
 });
 
 describe("fetchPanelMembers", () => {
-  it("resolves the active position itself when none is supplied", async () => {
+  it("queries the requested panel kind's group position", async () => {
     const { fetchPanelMembers } = await import("../src/dash/panel");
     const members = await fetchPanelMembers({
       sdk: makeSdk({
-        mainControlGroup: 1,
         groupInfo: {
-          0: { members: new Map([["old-panelist", 1]]), requiredPower: 2 },
-          1: { members: new Map([["new-panelist", 1]]), requiredPower: 2 },
+          1: {
+            members: new Map([
+              ["panelist-a", 1],
+              ["panelist-b", 1],
+            ]),
+            requiredPower: 3,
+          },
         },
       }),
       contractId: "contract-1",
+      kind: "revocation",
     });
-    expect(members).toEqual(["new-panelist"]);
+    expect(members).toEqual(["panelist-a", "panelist-b"]);
   });
 });

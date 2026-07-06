@@ -14,7 +14,7 @@ export default defineConfig({
   base: process.env.VITE_BASE_PATH || "/",
   resolve: {
     alias: {
-      // DashBounty imports the shared browser-safe SDK core from the repo
+      // Sift imports the shared browser-safe SDK core from the repo
       // root. That file also imports "@dashevo/evo-sdk", so bind the bare
       // specifier to this app's installed copy instead of depending on a
       // separate root-level npm install.

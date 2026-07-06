@@ -1,38 +1,19 @@
 /**
- * Bug-report data contract schema + registerContract / ensureContract.
+ * Sift data contract schema + registerContract / ensureContract.
  *
- * WHAT: A Dash Platform "data contract" defines the schema for documents.
- * This one describes a single document type (`report`) plus a "Researcher
- * Credit" token at position 0 and a "Triage Panel" group at position 0.
+ * Sift is a token-gated review queue for filtering useful security signal
+ * from AI slop. Submitters spend 1 Sift token to create a public submission.
+ * Two Platform groups govern access:
  *
- * report.tokenCost.create charges 1 Researcher Credit per submission,
- * transferred to the contract owner (effect: TransferTokenToContractOwner,
- * i.e. `effect: 0`) — a plain, non-refundable filing fee, same as any real
- * submission/listing fee. This is deliberately NOT `effect: 1` (BurnToken):
- * that value burns the charged token immediately and irreversibly at
- * submission time, which would make it impossible for the *same* charge to
- * later be "returned" — so a per-report fee can never itself be the thing
- * that gets frozen/destroyed. Freeze/destroy instead target a researcher's
- * *separately held, ongoing* credit balance (see researcherCredit.ts /
- * freezeCredit.ts / destroyFrozenCredit.ts).
+ * - Access group: 3 members, requiredPower 2. Can suspend and restore a
+ *   submitter's ability to spend Sift tokens.
+ * - Revocation group: the same 3 members, requiredPower 3. Can permanently
+ *   revoke a submitter's Sift tokens.
  *
- * The Triage Panel is 3 members at equal power (1 each) with
- * requiredPower: 2 — genuine 2-of-3, verified against Platform's consensus
- * validation rule for groups (GroupV0::validate in rs-dpp): total power
- * (3) >= requiredPower (2), and no single member's power (1) alone meets
- * requiredPower (2), so it always takes exactly 2 signers to act.
- *
- * `freezeRules` / `unfreezeRules` / `destroyFrozenFundsRules` are gated on
- * `AuthorizedActionTakers.MainGroup()` — whichever group is the token's
- * *current* main control group (initially group 0) can freeze/unfreeze/
- * destroy a researcher's credits, acting together. That "current" group can
- * change: the roster rotates via append-and-repoint (a published group is
- * immutable), which is why the rules point at MainGroup() rather than a
- * hard-coded position. See rotatePanelRoster.ts for the full mechanism.
- *
- * Storage helpers (loadStoredContractId, saveContractId, …) and the owner
- * lookup live in contractStorage.ts so they can be imported without
- * pulling the @dashevo/evo-sdk runtime into the entry bundle.
+ * The groups are explicit rule targets (`AuthorizedActionTakers.Group(n)`)
+ * rather than `MainGroup()`, so future versions can add more groups and map
+ * specific token functions to different authorities without changing the
+ * operation helpers' call shape.
  *
  * SDK methods: new DataContract({ ... }), dataContract.groups = {...},
  * sdk.contracts.publish(...)
@@ -54,11 +35,11 @@ import {
 import { loadStoredContractId, saveContractId } from "./contractStorage";
 import type { Logger } from "./logger";
 import {
-  RESEARCHER_CREDIT_NAME,
-  RESEARCHER_CREDIT_PLURAL,
-  RESEARCHER_CREDIT_POSITION,
-  RESEARCHER_CREDIT_BASE_SUPPLY,
-} from "./researcherCredit";
+  SIFT_TOKEN_BASE_SUPPLY,
+  SIFT_TOKEN_NAME,
+  SIFT_TOKEN_PLURAL,
+  SIFT_TOKEN_POSITION,
+} from "./siftToken";
 import type { DashKeyManager, DashSdk } from "./types";
 
 export {
@@ -69,14 +50,41 @@ export {
   saveContractId,
 } from "./contractStorage";
 
-// Position of the FOUNDING panel group only. After a rotation the active
-// group lives at a higher position — resolve it at runtime with
-// panel.ts's fetchActivePanelPosition instead of using this constant.
-export const PANEL_GROUP_POSITION = 0;
-export const PANEL_REQUIRED_POWER = 2;
+export const ACCESS_GROUP_POSITION = 0;
+export const REVOCATION_GROUP_POSITION = 1;
+export const ACCESS_GROUP_REQUIRED_POWER = 2;
+export const REVOCATION_GROUP_REQUIRED_POWER = 3;
 
-export const REPORT_SCHEMAS = {
-  report: {
+export const GROUP_DEFINITIONS = {
+  access: {
+    position: ACCESS_GROUP_POSITION,
+    requiredPower: ACCESS_GROUP_REQUIRED_POWER,
+    label: "Access Panel",
+    description: "Suspends and restores queue access.",
+  },
+  revocation: {
+    position: REVOCATION_GROUP_POSITION,
+    requiredPower: REVOCATION_GROUP_REQUIRED_POWER,
+    label: "Revocation Panel",
+    description: "Permanently revokes already-suspended Sift tokens.",
+  },
+} as const;
+
+export type PanelKind = keyof typeof GROUP_DEFINITIONS;
+export type PanelActionKind = "freeze" | "unfreeze" | "destroy";
+
+export const PANEL_ACTION_GROUPS: Record<PanelActionKind, PanelKind> = {
+  freeze: "access",
+  unfreeze: "access",
+  destroy: "revocation",
+};
+
+export function groupPositionForAction(kind: PanelActionKind): number {
+  return GROUP_DEFINITIONS[PANEL_ACTION_GROUPS[kind]].position;
+}
+
+export const SUBMISSION_SCHEMAS = {
+  submission: {
     type: "object",
     documentsMutable: true,
     documentsKeepHistory: true,
@@ -84,28 +92,24 @@ export const REPORT_SCHEMAS = {
     creationRestrictionMode: 0,
     tokenCost: {
       create: {
-        tokenPosition: RESEARCHER_CREDIT_POSITION,
+        tokenPosition: SIFT_TOKEN_POSITION,
         amount: 1,
-        effect: 0, // TransferTokenToContractOwner — see file header for why
+        effect: 0, // TransferTokenToContractOwner: queue-access spend
         gasFeesPaidBy: 0, // DocumentOwner
       },
     },
     properties: {
       title: {
         type: "string",
-        description: "Short summary of the vulnerability",
+        description: "Short summary of the submission",
         minLength: 1,
         maxLength: 128,
         position: 0,
       },
       severity: {
         type: "string",
-        description: "Researcher-assessed severity",
+        description: "Submitter-assessed severity",
         enum: ["low", "medium", "high", "critical"],
-        // Indexed string properties need an explicit maxLength — without
-        // one Platform treats it as unbounded and rejects it (schema
-        // validation requires indexed string bounds to be <= 63). 8 covers
-        // the longest enum value ("critical").
         maxLength: 8,
         position: 1,
       },
@@ -118,7 +122,8 @@ export const REPORT_SCHEMAS = {
       },
       description: {
         type: "string",
-        description: "Full report body: repro steps, impact, etc.",
+        description:
+          "Public summary for reviewers. Sensitive details should stay off-chain.",
         minLength: 1,
         maxLength: 2000,
         position: 3,
@@ -126,7 +131,7 @@ export const REPORT_SCHEMAS = {
       pocHash: {
         type: "string",
         description:
-          "Optional base64 SHA-256 of a local proof-of-concept file, hashed client-side. Not indexed — evidence metadata, not a lookup key.",
+          "Optional base64 SHA-256 of local evidence, hashed client-side. Evidence itself stays off-chain.",
         minLength: 44,
         maxLength: 44,
         position: 4,
@@ -141,11 +146,6 @@ export const REPORT_SCHEMAS = {
       "description",
     ],
     additionalProperties: false,
-    // Index property direction only supports "asc" — Platform's schema
-    // validator rejects "desc" (JsonSchemaError: "desc" is not one of
-    // ["asc"]). This is a property of the INDEX definition, not of queries:
-    // a query's own `orderBy` can still request "desc" against an
-    // "asc"-declared index (reverse scan) — see queries.ts.
     indices: [
       {
         name: "byOwner",
@@ -163,14 +163,13 @@ export const REPORT_SCHEMAS = {
   },
 } as const;
 
-export function createResearcherCreditConfiguration(ownerId: string) {
+export function createSiftTokenConfiguration(ownerId: string) {
   const contractOwner = AuthorizedActionTakers.ContractOwner();
   const noOne = AuthorizedActionTakers.NoOne();
-  // MainGroup() — not Group(0) — so freeze/unfreeze/destroy always follow
-  // whichever group is the token's CURRENT main control group. This is what
-  // makes roster rotation possible: repointing mainControlGroup at an
-  // appended group moves these powers with it, no rule rewrite needed.
-  const panel = AuthorizedActionTakers.MainGroup();
+  const accessGroup = AuthorizedActionTakers.Group(ACCESS_GROUP_POSITION);
+  const revocationGroup = AuthorizedActionTakers.Group(
+    REVOCATION_GROUP_POSITION,
+  );
 
   const ownerRules = new ChangeControlRules({
     authorizedToMakeChange: contractOwner,
@@ -183,9 +182,13 @@ export function createResearcherCreditConfiguration(ownerId: string) {
     authorizedToMakeChange: noOne,
     adminActionTakers: noOne,
   });
-  const panelRules = new ChangeControlRules({
-    authorizedToMakeChange: panel,
-    adminActionTakers: panel,
+  const accessRules = new ChangeControlRules({
+    authorizedToMakeChange: accessGroup,
+    adminActionTakers: accessGroup,
+  });
+  const revocationRules = new ChangeControlRules({
+    authorizedToMakeChange: revocationGroup,
+    adminActionTakers: revocationGroup,
   });
 
   return new TokenConfiguration({
@@ -193,21 +196,14 @@ export function createResearcherCreditConfiguration(ownerId: string) {
       {
         en: new TokenConfigurationLocalization(
           false,
-          RESEARCHER_CREDIT_NAME,
-          RESEARCHER_CREDIT_PLURAL,
+          SIFT_TOKEN_NAME,
+          SIFT_TOKEN_PLURAL,
         ),
       },
       0,
     ),
     conventionsChangeRules: ownerRules,
-    // Seeds the contract owner's balance at genesis (per
-    // distributionRules.newTokensDestinationIdentity below) so the operator
-    // has a working pool to distribute via ordinary sdk.tokens.transfer(...)
-    // right after publish, instead of the contract launching with zero
-    // credits in existence.
-    baseSupply: RESEARCHER_CREDIT_BASE_SUPPLY,
-    // Uncapped: the program should be able to onboard new researchers
-    // indefinitely, unlike a fixed-supply scarcity token.
+    baseSupply: SIFT_TOKEN_BASE_SUPPLY,
     maxSupply: undefined,
     keepsHistory: new TokenKeepsHistoryRules({
       isKeepingMintingHistory: true,
@@ -226,53 +222,52 @@ export function createResearcherCreditConfiguration(ownerId: string) {
       TokenTradeMode.NotTradeable(),
       lockedRules,
     ),
-    // Operator can top up the pool later if the seeded 100 runs low.
     manualMintingRules: ownerRules,
-    // The only way credits leave circulation is via destroyFrozen — keeps
-    // the "burned only by slash" invariant clean and demonstrable.
     manualBurningRules: lockedRules,
-    freezeRules: panelRules,
-    unfreezeRules: panelRules,
-    destroyFrozenFundsRules: panelRules,
+    freezeRules: accessRules,
+    unfreezeRules: accessRules,
+    destroyFrozenFundsRules: revocationRules,
     emergencyActionRules: lockedRules,
-    // The founding Triage Panel governs the token from launch…
-    mainControlGroup: PANEL_GROUP_POSITION,
-    // …and ContractOwner (not NoOne) lets the operator later repoint
-    // governance at an appended group — the app's admin model is that the
-    // bounty operator administers roster membership; the panel does not
-    // self-govern its own composition. See rotatePanelRoster.ts.
-    mainControlGroupCanBeModified: contractOwner,
+    // Kept for token config completeness, but the action rules above target
+    // explicit group positions rather than MainGroup().
+    mainControlGroup: ACCESS_GROUP_POSITION,
+    mainControlGroupCanBeModified: noOne,
     description:
-      "Researcher Credit — filing fee + freezable/slashable standing balance for the DashBounty triage panel.",
+      "Sift token — queue-access token for filtering real security signal from AI slop.",
   });
 }
 
-/**
- * Build the Triage Panel's Group: 3 members at equal power (1 each),
- * requiredPower 2 — genuine 2-of-3. Order of panelMemberIds does not
- * matter; each gets power 1.
- */
-export function createTriagePanelGroup(panelMemberIds: string[]) {
+export function createPanelGroup(
+  panelMemberIds: string[],
+  requiredPower: number,
+) {
   if (panelMemberIds.length !== 3) {
     throw new Error(
-      `Triage panel needs exactly 3 members, got ${panelMemberIds.length}`,
+      `Sift panels need exactly 3 members, got ${panelMemberIds.length}`,
     );
   }
   if (new Set(panelMemberIds).size !== panelMemberIds.length) {
     throw new Error(
-      "Triage panel members must be 3 distinct identities (duplicate IDs would collapse the group below 3 signers)",
+      "Sift panel members must be 3 distinct identities (duplicate IDs would collapse the group below 3 signers)",
     );
   }
   const members = new Map<string, number>(panelMemberIds.map((id) => [id, 1]));
-  return new Group(members, PANEL_REQUIRED_POWER);
+  return new Group(members, requiredPower);
 }
 
-/**
- * Register a fresh bounty data contract on Platform and persist its ID.
- *
- * SDK methods: sdk.identities.nonce(...), new DataContract(...),
- * dataContract.groups = {...}, sdk.contracts.publish(...).
- */
+export function createSiftGroups(panelMemberIds: string[]) {
+  return {
+    [ACCESS_GROUP_POSITION]: createPanelGroup(
+      panelMemberIds,
+      ACCESS_GROUP_REQUIRED_POWER,
+    ),
+    [REVOCATION_GROUP_POSITION]: createPanelGroup(
+      panelMemberIds,
+      REVOCATION_GROUP_REQUIRED_POWER,
+    ),
+  };
+}
+
 export async function registerContract({
   sdk,
   keyManager,
@@ -284,29 +279,24 @@ export async function registerContract({
   panelMemberIds: string[];
   log?: Logger;
 }): Promise<string> {
-  log?.("Registering bounty contract…");
+  log?.("Registering Sift contract...");
   const { identity, identityKey, signer } = await keyManager.getAuth();
   const identityNonce = await sdk.identities.nonce(identity.id.toString());
   const dataContract = new DataContract({
     ownerId: identity.id,
     identityNonce: (identityNonce || 0n) + 1n,
-    schemas: REPORT_SCHEMAS,
+    schemas: SUBMISSION_SCHEMAS,
     tokens: {
-      [RESEARCHER_CREDIT_POSITION]: createResearcherCreditConfiguration(
+      [SIFT_TOKEN_POSITION]: createSiftTokenConfiguration(
         identity.id.toString(),
       ),
     },
     fullValidation: true,
   });
 
-  // DataContract.groups is a plain settable property, not a constructor
-  // option and not behind a setter method (unlike .schemas, which requires
-  // .setSchemas(...)) — assign it directly before publishing.
-  dataContract.groups = {
-    [PANEL_GROUP_POSITION]: createTriagePanelGroup(panelMemberIds),
-  };
+  dataContract.groups = createSiftGroups(panelMemberIds);
 
-  log?.("Publishing contract…");
+  log?.("Publishing contract...");
   const published = await sdk.contracts.publish({
     dataContract,
     identityKey,
@@ -321,16 +311,10 @@ export async function registerContract({
   }
 
   saveContractId(contractId);
-  log?.(`Contract registered: ${contractId}`, "success");
+  log?.(`Sift contract registered: ${contractId}`, "success");
   return contractId;
 }
 
-/**
- * Ensure a bounty data contract exists for this app. If a contract ID is
- * already persisted in localStorage (or passed in), we reuse it. Otherwise
- * publish a fresh contract owned by the signed-in identity, with the given
- * panel member IDs, and persist its ID for next time.
- */
 export async function ensureContract({
   sdk,
   keyManager,

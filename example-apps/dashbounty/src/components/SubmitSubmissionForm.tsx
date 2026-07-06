@@ -1,26 +1,31 @@
 import { useEffect, useState } from "react";
 
+import { fetchFrozenStatus } from "../dash/frozenStatus";
 import { errorMessage } from "../dash/logger";
-import { fetchCreditBalance } from "../dash/researcherCredit";
-import { submitReport, type ReportSeverity } from "../dash/submitReport";
+import { fetchSiftTokenBalance } from "../dash/siftToken";
+import {
+  submitSubmission,
+  type SubmissionSeverity,
+} from "../dash/submitSubmission";
 import { bytesToBase64, hashFile } from "../lib/hash";
 import { useSession } from "../session/useSession";
 
-const SEVERITIES: ReportSeverity[] = ["low", "medium", "high", "critical"];
+const SEVERITIES: SubmissionSeverity[] = ["low", "medium", "high", "critical"];
 
-export function SubmitReportForm({
+export function SubmitSubmissionForm({
   onSubmitted,
 }: {
   onSubmitted?: () => void;
 }) {
   const session = useSession();
   const [title, setTitle] = useState("");
-  const [severity, setSeverity] = useState<ReportSeverity>("medium");
+  const [severity, setSeverity] = useState<SubmissionSeverity>("medium");
   const [component, setComponent] = useState("");
   const [description, setDescription] = useState("");
   const [pocFile, setPocFile] = useState<File | null>(null);
   const [pocHash, setPocHash] = useState<string | null>(null);
   const [balance, setBalance] = useState<bigint | null>(null);
+  const [isSuspended, setIsSuspended] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -30,14 +35,26 @@ export function SubmitReportForm({
     void (async () => {
       const { sdk, contractId, identityId } = session;
       if (!sdk || !contractId || !identityId) {
-        if (!cancelled) setBalance(null);
+        if (!cancelled) {
+          setBalance(null);
+          setIsSuspended(false);
+        }
         return;
       }
       try {
-        const value = await fetchCreditBalance({ sdk, contractId, identityId });
-        if (!cancelled) setBalance(value);
+        const [nextBalance, suspended] = await Promise.all([
+          fetchSiftTokenBalance({ sdk, contractId, identityId }),
+          fetchFrozenStatus({ sdk, contractId, identityId }),
+        ]);
+        if (!cancelled) {
+          setBalance(nextBalance);
+          setIsSuspended(suspended);
+        }
       } catch {
-        if (!cancelled) setBalance(null);
+        if (!cancelled) {
+          setBalance(null);
+          setIsSuspended(false);
+        }
       }
     })();
     return () => {
@@ -61,22 +78,26 @@ export function SubmitReportForm({
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (!session.sdk || !session.keyManager) {
-      setError("Sign in before submitting a report.");
+      setError("Sign in before submitting.");
       return;
     }
     if (!session.contractId) {
-      setError("Register or select a bounty contract first (Account tab).");
+      setError("Register or select a Sift contract first (Account tab).");
+      return;
+    }
+    if (isSuspended) {
+      setError("Your access is suspended. A Review Panel must restore it.");
       return;
     }
     setBusy(true);
     setError(null);
     setStatus(null);
     try {
-      await submitReport({
+      await submitSubmission({
         sdk: session.sdk,
         keyManager: session.keyManager,
         contractId: session.contractId,
-        report: {
+        submission: {
           title,
           severity,
           component,
@@ -85,7 +106,7 @@ export function SubmitReportForm({
         },
         log: session.log,
       });
-      setStatus("Report filed.");
+      setStatus("Submission filed.");
       setTitle("");
       setComponent("");
       setDescription("");
@@ -99,23 +120,32 @@ export function SubmitReportForm({
     }
   }
 
-  const noCredits = balance != null && balance <= 0n;
+  const noTokens = balance != null && balance <= 0n;
 
   return (
     <div className="card">
-      <h3>Submit a bug report</h3>
+      <h3>Submit to Sift</h3>
+      <p className="muted">
+        Spend 1 Sift token to enter the review queue. Keep sensitive exploit
+        detail off-chain; use the evidence hash for local proof material.
+      </p>
       {balance != null && (
         <p className="muted">
-          Researcher Credit balance: <strong>{balance.toString()}</strong> —
-          filing costs 1 credit.
+          Sift token balance: <strong>{balance.toString()}</strong>
         </p>
       )}
       {error && <div className="notice error">{error}</div>}
       {status && <div className="notice info">{status}</div>}
-      {noCredits && (
+      {isSuspended && (
         <div className="notice error">
-          No Researcher Credits remaining — ask the program operator to transfer
-          some to your identity before filing.
+          Access suspended — you cannot spend Sift tokens until the Review Panel
+          restores access.
+        </div>
+      )}
+      {noTokens && (
+        <div className="notice error">
+          No Sift tokens remaining — ask the operator to transfer more before
+          submitting.
         </div>
       )}
       <form onSubmit={handleSubmit}>
@@ -136,7 +166,7 @@ export function SubmitReportForm({
               id="severity"
               value={severity}
               onChange={(event) =>
-                setSeverity(event.target.value as ReportSeverity)
+                setSeverity(event.target.value as SubmissionSeverity)
               }
             >
               {SEVERITIES.map((s) => (
@@ -158,7 +188,7 @@ export function SubmitReportForm({
           />
         </div>
         <div className="field">
-          <label htmlFor="description">Description</label>
+          <label htmlFor="description">Public summary</label>
           <textarea
             id="description"
             rows={5}
@@ -169,9 +199,7 @@ export function SubmitReportForm({
           />
         </div>
         <div className="field">
-          <label htmlFor="poc">
-            Proof-of-concept file (optional, hashed locally)
-          </label>
+          <label htmlFor="poc">Evidence file (optional, hashed locally)</label>
           <input id="poc" type="file" onChange={handleFileChange} />
           {pocFile && pocHash && (
             <p className="muted">
@@ -179,8 +207,8 @@ export function SubmitReportForm({
             </p>
           )}
         </div>
-        <button type="submit" disabled={busy || noCredits}>
-          {busy ? "Filing…" : "File report (1 credit)"}
+        <button type="submit" disabled={busy || noTokens || isSuspended}>
+          {busy ? "Submitting..." : "Spend 1 Sift token"}
         </button>
       </form>
     </div>

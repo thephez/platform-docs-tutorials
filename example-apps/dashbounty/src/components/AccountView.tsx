@@ -3,14 +3,13 @@ import { useEffect, useState } from "react";
 import { CopyableId } from "./CopyableId";
 import { registerContract } from "../dash/contract";
 import { errorMessage } from "../dash/logger";
-import { fetchCreditBalance } from "../dash/researcherCredit";
+import { fetchSiftTokenBalance } from "../dash/siftToken";
 import { useSession } from "../session/useSession";
 
 /**
- * The 3 initial Triage Panel member identity IDs, read from env vars rather
- * than hardcoded — a group inherently needs 3 different signing identities
- * available to whoever runs the demo, unlike a single hardcoded owner
- * identity. Populated by scripts/bootstrap-identities.mjs into .env.
+ * The 3 initial panel member identity IDs, read from env vars rather than
+ * hardcoded. Sift registers two groups with the same members: 2-of-3 for
+ * suspend/restore, 3-of-3 for permanent token revocation.
  */
 const PANELIST_IDS = [
   import.meta.env.VITE_PANELIST_1_ID,
@@ -36,7 +35,11 @@ export function AccountView() {
         return;
       }
       try {
-        const value = await fetchCreditBalance({ sdk, contractId, identityId });
+        const value = await fetchSiftTokenBalance({
+          sdk,
+          contractId,
+          identityId,
+        });
         if (!cancelled) setBalance(value);
       } catch {
         if (!cancelled) setBalance(null);
@@ -73,7 +76,7 @@ export function AccountView() {
     }
     if (PANELIST_IDS.length !== 3) {
       setLocalError(
-        "Set VITE_PANELIST_1_ID/_2_ID/_3_ID (see scripts/bootstrap-identities.mjs) before registering a contract.",
+        "Set VITE_PANELIST_1_ID/_2_ID/_3_ID (see scripts/bootstrap-identities.mjs) before registering a Sift contract.",
       );
       return;
     }
@@ -98,7 +101,7 @@ export function AccountView() {
   return (
     <div>
       <div className="card">
-        <h3>Bounty contract</h3>
+        <h3>Sift contract</h3>
         <form onSubmit={handleContractSubmit} className="row">
           <input
             value={contractInput}
@@ -128,9 +131,10 @@ export function AccountView() {
           </button>
         </div>
         <p className="muted" style={{ marginTop: "0.5rem" }}>
-          Registering creates a fresh Researcher Credit token and Triage Panel
-          group (3 members from VITE_PANELIST_1_ID/_2_ID/_3_ID), seeded with 100
-          credits owned by the signing identity.
+          Registering creates a fresh Sift token and two Review Panel groups
+          from VITE_PANELIST_1_ID/_2_ID/_3_ID: 2-of-3 for suspend/restore and
+          3-of-3 for revoking suspended tokens. The signing identity receives
+          the initial 100 Sift tokens.
         </p>
       </div>
 
@@ -142,7 +146,7 @@ export function AccountView() {
           </p>
           {balance != null && (
             <p>
-              Researcher Credit balance: <strong>{balance.toString()}</strong>
+              Sift token balance: <strong>{balance.toString()}</strong>
             </p>
           )}
           <button type="button" className="secondary" onClick={session.logout}>
@@ -166,7 +170,7 @@ export function AccountView() {
             </div>
             <div className="field">
               <label htmlFor="identity-index">
-                Identity index (0 = researcher, 1-3 = panelists — see
+                Identity index (0 = submitter, 1-3 = panelists — see
                 scripts/bootstrap-identities.mjs)
               </label>
               <input

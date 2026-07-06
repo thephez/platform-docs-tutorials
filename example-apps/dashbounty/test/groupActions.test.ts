@@ -132,7 +132,7 @@ describe("unfreezeCredit — propose vs co-sign branching", () => {
       keyManager: makeKeyManager(),
       contractId: "contract-1",
       groupPosition: 1,
-      frozenIdentityId: "cleared-researcher-1",
+      frozenIdentityId: "cleared-submitter-1",
     });
 
     expect(unfreeze).toHaveBeenCalledWith(
@@ -151,7 +151,7 @@ describe("unfreezeCredit — propose vs co-sign branching", () => {
       keyManager: makeKeyManager(),
       contractId: "contract-1",
       groupPosition: 1,
-      frozenIdentityId: "cleared-researcher-1",
+      frozenIdentityId: "cleared-submitter-1",
       actionId: "action-def",
     });
 
@@ -170,11 +170,9 @@ describe("unfreezeCredit — propose vs co-sign branching", () => {
 describe("describeGroupAction", () => {
   it("maps token event names to human-readable labels", async () => {
     const { describeGroupAction } = await import("../src/dash/groupActions");
-    expect(describeGroupAction("TokenFreeze")).toMatch(/freeze/i);
-    expect(describeGroupAction("TokenUnfreeze")).toMatch(/unfreeze/i);
-    expect(describeGroupAction("TokenDestroyFrozenFunds")).toMatch(
-      /slash|destroy/i,
-    );
+    expect(describeGroupAction("TokenFreeze")).toMatch(/suspend/i);
+    expect(describeGroupAction("TokenUnfreeze")).toMatch(/restore/i);
+    expect(describeGroupAction("TokenDestroyFrozenFunds")).toMatch(/revoke/i);
   });
 });
 
