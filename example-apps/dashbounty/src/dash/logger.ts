@@ -22,8 +22,11 @@ export const consoleLogger: Logger = (msg, level = "info") => {
 /**
  * Extract a human-readable message from an unknown thrown value.
  *
- * The Evo SDK (WASM-based) sometimes throws plain objects rather than
- * Error instances. This helper walks common shapes to find a string:
+ * The Evo SDK (WASM-based) sometimes throws wasm-bindgen–wrapped objects
+ * rather than Error instances, but it exposes `message` as a getter — so
+ * `typeof obj.message === "string"` reads it just like a plain object's,
+ * and we never fall through to a `{"__wbg_ptr":N}` JSON.stringify. This
+ * matches the sibling apps' logger (dashmint-lab / dashproof-lab):
  *   - Error               → .message
  *   - { message: string } → .message
  *   - string              → as-is

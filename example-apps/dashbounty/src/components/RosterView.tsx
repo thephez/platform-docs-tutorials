@@ -3,39 +3,62 @@ import { useEffect, useState } from "react";
 import { CopyableId } from "./CopyableId";
 import { fetchContractOwnerId } from "../dash/contract";
 import { errorMessage } from "../dash/logger";
-import { fetchPanelMembers } from "../dash/panel";
-import { updatePanelRoster } from "../dash/updatePanelRoster";
+import { fetchActivePanelPosition, fetchPanelMembers } from "../dash/panel";
+import { rotatePanelRoster } from "../dash/rotatePanelRoster";
 import { useSession } from "../session/useSession";
 
 /**
- * Panel roster changes are owner-key-authorized, not group-gated —
- * `DataContractConfig` has no ChangeControlRules-style admin gate of its
- * own, so `sdk.contracts.update(...)` is unconditionally signed by the
- * contract owner. The bounty program *operator* administers who's on the
- * panel; the panel doesn't self-govern its own membership. This view is
- * gated on "connected identity is the contract owner" to teach that
- * mechanism correctly rather than implying it's panel-gated.
+ * Triage Panel roster: current members, plus owner-gated rotation.
+ *
+ * A published group itself is IMMUTABLE — Platform rejects any contract
+ * update that touches an existing group
+ * (DataContractUpdateActionNotAllowedError), so there is no in-place
+ * add/remove/swap-member edit. Rotation instead appends a brand-new
+ * 3-member group at the next contiguous position and repoints the token's
+ * mainControlGroup at it (see rotatePanelRoster.ts). Because
+ * freeze/unfreeze/destroy are gated on AuthorizedActionTakers.MainGroup(),
+ * the new roster takes over token governance the moment the repoint lands.
+ *
+ * Only the CONTRACT OWNER can rotate — mainControlGroupCanBeModified is
+ * ContractOwner, matching this app's admin model where the bounty operator
+ * administers roster membership. The form only renders for the signed-in
+ * owner; anyone else sees the read-only member list.
  */
 export function RosterView() {
   const session = useSession();
   const [members, setMembers] = useState<string[]>([]);
+  const [groupPosition, setGroupPosition] = useState<number | null>(null);
   const [ownerId, setOwnerId] = useState<string | null>(null);
-  const [addId, setAddId] = useState("");
-  const [removeId, setRemoveId] = useState("");
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Rotation form: exactly 3 replacement member IDs.
+  const [newMemberIds, setNewMemberIds] = useState<[string, string, string]>([
+    "",
+    "",
+    "",
+  ]);
 
   async function refresh() {
     if (!session.sdk || !session.contractId) return;
     setError(null);
     try {
+      const position = await fetchActivePanelPosition({
+        sdk: session.sdk,
+        contractId: session.contractId,
+      });
       const [memberIds, owner] = await Promise.all([
-        fetchPanelMembers({ sdk: session.sdk, contractId: session.contractId }),
+        fetchPanelMembers({
+          sdk: session.sdk,
+          contractId: session.contractId,
+          groupPosition: position,
+        }),
         fetchContractOwnerId({
           sdk: session.sdk,
           contractId: session.contractId,
         }),
       ]);
+      setGroupPosition(position);
       setMembers(memberIds);
       setOwnerId(owner);
     } catch (err) {
@@ -50,24 +73,25 @@ export function RosterView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.sdk, session.contractId]);
 
-  const isOwner = Boolean(ownerId && session.identityId === ownerId);
+  const isOwner =
+    session.status === "authenticated" &&
+    !!session.identityId &&
+    session.identityId === ownerId;
 
-  async function handleSubmit(event: React.FormEvent) {
+  async function handleRotate(event: React.FormEvent) {
     event.preventDefault();
     if (!session.sdk || !session.keyManager || !session.contractId) return;
     setBusy(true);
     setError(null);
     try {
-      await updatePanelRoster({
+      await rotatePanelRoster({
         sdk: session.sdk,
         keyManager: session.keyManager,
         contractId: session.contractId,
-        addMemberId: addId.trim() || undefined,
-        removeMemberId: removeId.trim() || undefined,
+        newPanelMemberIds: newMemberIds.map((id) => id.trim()),
         log: session.log,
       });
-      setAddId("");
-      setRemoveId("");
+      setNewMemberIds(["", "", ""]);
       await refresh();
     } catch (err) {
       setError(errorMessage(err));
@@ -87,6 +111,9 @@ export function RosterView() {
       {error && <div className="notice error">{error}</div>}
       <div className="card">
         <h3>Current panel members</h3>
+        {groupPosition !== null && (
+          <p className="muted">Active group position: {groupPosition}</p>
+        )}
         <ul>
           {members.map((id) => (
             <li key={id}>
@@ -94,49 +121,54 @@ export function RosterView() {
             </li>
           ))}
         </ul>
+        {ownerId && (
+          <p className="muted row">
+            Contract owner: <CopyableId id={ownerId} />
+          </p>
+        )}
       </div>
 
-      {isOwner ? (
+      {isOwner && (
         <div className="card">
-          <h3>Rotate a member</h3>
+          <h3>Rotate panel</h3>
           <p className="muted">
-            The panel must always have exactly 3 members — provide both an
-            addition and a removal to swap one out, or just one if the roster is
-            mid-adjustment.
+            Enter exactly 3 identity IDs for the replacement roster. This
+            appends a new group and repoints token governance at it in one flow
+            — the current group stays in the contract but loses all power.
           </p>
-          <form onSubmit={handleSubmit}>
-            <div className="grid-2">
-              <div className="field">
-                <label htmlFor="remove-id">Remove member ID</label>
+          <form onSubmit={handleRotate}>
+            {newMemberIds.map((value, index) => (
+              <div className="field" key={index}>
+                <label htmlFor={`new-member-${index + 1}`}>
+                  New member {index + 1}
+                </label>
                 <input
-                  id="remove-id"
-                  value={removeId}
-                  onChange={(event) => setRemoveId(event.target.value)}
+                  id={`new-member-${index + 1}`}
+                  value={value}
+                  required
+                  onChange={(event) =>
+                    setNewMemberIds((prev) => {
+                      const next = [...prev] as typeof prev;
+                      next[index] = event.target.value;
+                      return next;
+                    })
+                  }
                 />
               </div>
-              <div className="field">
-                <label htmlFor="add-id">Add member ID</label>
-                <input
-                  id="add-id"
-                  value={addId}
-                  onChange={(event) => setAddId(event.target.value)}
-                />
-              </div>
-            </div>
-            <button
-              type="submit"
-              disabled={busy || (!addId.trim() && !removeId.trim())}
-            >
-              Update roster
+            ))}
+            <button type="submit" disabled={busy}>
+              Rotate panel
             </button>
           </form>
         </div>
-      ) : (
-        <div className="notice info row">
-          Only the contract owner (<CopyableId id={ownerId} />) can change the
-          panel roster — sign in as that identity to make changes here.
-        </div>
       )}
+
+      <div className="notice info">
+        A published group is immutable — members can never be added, removed, or
+        swapped in place. Rotation works by appending a new 3-member group and
+        repointing the token&apos;s main control group at it; only the contract
+        owner can do this.
+      </div>
     </div>
   );
 }

@@ -23,13 +23,12 @@
  * requiredPower (2), so it always takes exactly 2 signers to act.
  *
  * `freezeRules` / `unfreezeRules` / `destroyFrozenFundsRules` are gated on
- * `AuthorizedActionTakers.Group(PANEL_GROUP_POSITION)` — only the panel,
- * acting together, can freeze/unfreeze/destroy a researcher's credits.
- * Panel *roster* changes (who the 3 members are) are a different mechanism
- * entirely: there is no group-gated way to add/remove a group member —
- * `DataContractConfig` has no ChangeControlRules-style admin gate of its
- * own, so `sdk.contracts.update(...)` is unconditionally owner-key-
- * authorized. See updatePanelRoster.ts.
+ * `AuthorizedActionTakers.MainGroup()` — whichever group is the token's
+ * *current* main control group (initially group 0) can freeze/unfreeze/
+ * destroy a researcher's credits, acting together. That "current" group can
+ * change: the roster rotates via append-and-repoint (a published group is
+ * immutable), which is why the rules point at MainGroup() rather than a
+ * hard-coded position. See rotatePanelRoster.ts for the full mechanism.
  *
  * Storage helpers (loadStoredContractId, saveContractId, …) and the owner
  * lookup live in contractStorage.ts so they can be imported without
@@ -70,6 +69,9 @@ export {
   saveContractId,
 } from "./contractStorage";
 
+// Position of the FOUNDING panel group only. After a rotation the active
+// group lives at a higher position — resolve it at runtime with
+// panel.ts's fetchActivePanelPosition instead of using this constant.
 export const PANEL_GROUP_POSITION = 0;
 export const PANEL_REQUIRED_POWER = 2;
 
@@ -157,7 +159,11 @@ export const REPORT_SCHEMAS = {
 export function createResearcherCreditConfiguration(ownerId: string) {
   const contractOwner = AuthorizedActionTakers.ContractOwner();
   const noOne = AuthorizedActionTakers.NoOne();
-  const panel = AuthorizedActionTakers.Group(PANEL_GROUP_POSITION);
+  // MainGroup() — not Group(0) — so freeze/unfreeze/destroy always follow
+  // whichever group is the token's CURRENT main control group. This is what
+  // makes roster rotation possible: repointing mainControlGroup at an
+  // appended group moves these powers with it, no rule rewrite needed.
+  const panel = AuthorizedActionTakers.MainGroup();
 
   const ownerRules = new ChangeControlRules({
     authorizedToMakeChange: contractOwner,
@@ -222,9 +228,13 @@ export function createResearcherCreditConfiguration(ownerId: string) {
     unfreezeRules: panelRules,
     destroyFrozenFundsRules: panelRules,
     emergencyActionRules: lockedRules,
+    // The founding Triage Panel governs the token from launch…
     mainControlGroup: PANEL_GROUP_POSITION,
-    // Don't let anyone repoint which group governs the token after launch.
-    mainControlGroupCanBeModified: noOne,
+    // …and ContractOwner (not NoOne) lets the operator later repoint
+    // governance at an appended group — the app's admin model is that the
+    // bounty operator administers roster membership; the panel does not
+    // self-govern its own composition. See rotatePanelRoster.ts.
+    mainControlGroupCanBeModified: contractOwner,
     description:
       "Researcher Credit — filing fee + freezable/slashable standing balance for the DashBounty triage panel.",
   });
@@ -239,6 +249,11 @@ export function createTriagePanelGroup(panelMemberIds: string[]) {
   if (panelMemberIds.length !== 3) {
     throw new Error(
       `Triage panel needs exactly 3 members, got ${panelMemberIds.length}`,
+    );
+  }
+  if (new Set(panelMemberIds).size !== panelMemberIds.length) {
+    throw new Error(
+      "Triage panel members must be 3 distinct identities (duplicate IDs would collapse the group below 3 signers)",
     );
   }
   const members = new Map<string, number>(panelMemberIds.map((id) => [id, 1]));

@@ -30,4 +30,19 @@ test.describe("Read-only browsing (no auth required)", () => {
       page.getByText(/Triage Panel|Configure a bounty contract first/),
     ).toBeVisible();
   });
+
+  test("Roster rotation controls are owner-gated — hidden from read-only visitors", async ({
+    page,
+  }) => {
+    await page.getByRole("button", { name: "Roster" }).click();
+    await expect(
+      page.getByText(/panel members|Configure a bounty contract first/),
+    ).toBeVisible();
+    // Rotation exists (append a new group + repoint the token's main
+    // control group, owner-signed), but only the signed-in CONTRACT OWNER
+    // gets the form — an unauthenticated read-only session never sees it.
+    await expect(
+      page.getByRole("button", { name: /rotate panel/i }),
+    ).toHaveCount(0);
+  });
 });

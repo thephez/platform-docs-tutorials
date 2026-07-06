@@ -21,6 +21,7 @@ vi.mock("@dashevo/evo-sdk", () => ({
     ContractOwner: () => ({ type: "ContractOwner" }),
     NoOne: () => ({ type: "NoOne" }),
     Group: (position: number) => ({ type: "Group", position }),
+    MainGroup: () => ({ type: "MainGroup" }),
   },
   ChangeControlRules: class ChangeControlRules {
     constructor(public options: unknown) {}
@@ -85,7 +86,7 @@ describe("bounty contract schema", () => {
 });
 
 describe("Researcher Credit token configuration", () => {
-  it("gates freeze, unfreeze, and destroyFrozenFunds on the Triage Panel group", async () => {
+  it("gates freeze, unfreeze, and destroyFrozenFunds on MainGroup — not a hard-coded position", async () => {
     const { createResearcherCreditConfiguration, PANEL_GROUP_POSITION } =
       await import("../src/dash/contract");
 
@@ -104,17 +105,62 @@ describe("Researcher Credit token configuration", () => {
       };
     };
 
-    const groupSentinel = { type: "Group", position: PANEL_GROUP_POSITION };
+    // MainGroup() follows the token's CURRENT main control group, which is
+    // what lets a roster rotation (append group + repoint) move these
+    // powers without rewriting the rules.
+    const mainGroupSentinel = { type: "MainGroup" };
     expect(config.options.freezeRules.options.authorizedToMakeChange).toEqual(
-      groupSentinel,
+      mainGroupSentinel,
     );
     expect(config.options.unfreezeRules.options.authorizedToMakeChange).toEqual(
-      groupSentinel,
+      mainGroupSentinel,
     );
     expect(
       config.options.destroyFrozenFundsRules.options.authorizedToMakeChange,
-    ).toEqual(groupSentinel);
+    ).toEqual(mainGroupSentinel);
+    // …while governance STARTS at the founding panel, group 0.
     expect(config.options.mainControlGroup).toBe(PANEL_GROUP_POSITION);
+  });
+
+  it("keeps admin control of freeze/unfreeze/destroy on MainGroup too", async () => {
+    const { createResearcherCreditConfiguration } =
+      await import("../src/dash/contract");
+    const config = createResearcherCreditConfiguration(
+      "owner-1",
+    ) as unknown as {
+      options: {
+        freezeRules: { options: { adminActionTakers: unknown } };
+        unfreezeRules: { options: { adminActionTakers: unknown } };
+        destroyFrozenFundsRules: { options: { adminActionTakers: unknown } };
+      };
+    };
+
+    const mainGroupSentinel = { type: "MainGroup" };
+    expect(config.options.freezeRules.options.adminActionTakers).toEqual(
+      mainGroupSentinel,
+    );
+    expect(config.options.unfreezeRules.options.adminActionTakers).toEqual(
+      mainGroupSentinel,
+    );
+    expect(
+      config.options.destroyFrozenFundsRules.options.adminActionTakers,
+    ).toEqual(mainGroupSentinel);
+  });
+
+  it("lets the contract owner repoint the main control group — the rotation escape hatch", async () => {
+    const { createResearcherCreditConfiguration } =
+      await import("../src/dash/contract");
+    const config = createResearcherCreditConfiguration(
+      "owner-1",
+    ) as unknown as {
+      options: { mainControlGroupCanBeModified: unknown };
+    };
+    // Existing groups are immutable on-chain, so ContractOwner here is what
+    // makes roster rotation possible at all: the operator appends a new
+    // group, then repoints mainControlGroup at it (rotatePanelRoster.ts).
+    expect(config.options.mainControlGroupCanBeModified).toEqual({
+      type: "ContractOwner",
+    });
   });
 
   it("locks manual burning to NoOne — the only way credits disappear is via destroyFrozen", async () => {
@@ -164,6 +210,13 @@ describe("Triage Panel group", () => {
     expect(() => createTriagePanelGroup(["a", "b", "c", "d"])).toThrow(
       /exactly 3/,
     );
+  });
+
+  it("rejects a panel with duplicate member IDs so the group cannot silently collapse below 3 signers", async () => {
+    const { createTriagePanelGroup } = await import("../src/dash/contract");
+    expect(() => createTriagePanelGroup(["a", "a", "b"])).toThrow(/distinct/);
+    expect(() => createTriagePanelGroup(["a", "b", "a"])).toThrow(/distinct/);
+    expect(() => createTriagePanelGroup(["a", "a", "a"])).toThrow(/distinct/);
   });
 });
 
