@@ -15,7 +15,7 @@ const STORAGE_KEY = "dashbounty.contractId";
  * scripts/bootstrap-identities.mjs), Triage Panel is identity indices 1-3.
  */
 export const DEFAULT_CONTRACT_ID: string | null =
-  "4RS5tefgMLQN9ZsFkkhgoEqQwEvzMSppEGQBsqDGaHsq";
+  "AZKQEAN2voBiLVHkAamMVjYLSxip73DJ4eks8jkQ9mEi";
 
 export function loadStoredContractId(): string | null {
   return localStorage.getItem(STORAGE_KEY) ?? DEFAULT_CONTRACT_ID;

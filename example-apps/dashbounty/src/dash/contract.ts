@@ -140,7 +140,14 @@ export const REPORT_SCHEMAS = {
         position: 4,
       },
     },
-    required: ["title", "severity", "component", "description"],
+    required: [
+      "$createdAt",
+      "$updatedAt",
+      "title",
+      "severity",
+      "component",
+      "description",
+    ],
     additionalProperties: false,
     // Index property direction only supports "asc" — Platform's schema
     // validator rejects "desc" (JsonSchemaError: "desc" is not one of
