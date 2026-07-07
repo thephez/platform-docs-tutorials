@@ -29,7 +29,7 @@ import { config as loadEnv } from "dotenv";
 // Import Identity/Identifier from the REPO-ROOT @dashevo/evo-sdk copy — the
 // same one setupDashClient.mjs (also at the repo root) loads — rather than
 // the bare specifier. A bare `import ... from "@dashevo/evo-sdk"` in a
-// script under example-apps/dashbounty/ resolves to this app's LOCAL
+// script under example-apps/sift/ resolves to this app's LOCAL
 // node_modules copy, a different module instance from the root one the
 // helper uses; the two produce distinct class constructors under Node 22,
 // which breaks `instanceof` inside the SDK mid-create. Sharing the root
@@ -43,7 +43,7 @@ import {
 const here = dirname(fileURLToPath(import.meta.url));
 const envPath = resolve(here, "../.env");
 
-// `npm run bootstrap:identities` runs with cwd = example-apps/dashbounty/,
+// `npm run bootstrap:identities` runs with cwd = example-apps/sift/,
 // but PLATFORM_MNEMONIC lives in the repo-root .env. Load it explicitly
 // before setupDashClient.mjs's own dotenv.config() call runs — dotenv
 // doesn't override already-set process.env values, so this wins.

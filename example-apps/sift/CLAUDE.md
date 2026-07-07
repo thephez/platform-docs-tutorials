@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code when working in [example-apps/dashbounty/](.).
+This file provides guidance to Claude Code when working in [example-apps/sift/](.).
 
 ## Project Overview
 
