@@ -3,7 +3,7 @@
  *
  * Sift is a token-gated review queue for filtering useful security signal
  * from AI slop. Submitters spend 1 Sift token to create a public submission.
- * Two Platform groups govern access:
+ * Two initial Platform groups govern access:
  *
  * - Access group: 3 members, requiredPower 2. Can suspend and restore a
  *   submitter's ability to spend Sift tokens.
@@ -11,9 +11,8 @@
  *   revoke a submitter's Sift tokens.
  *
  * The groups are explicit rule targets (`AuthorizedActionTakers.Group(n)`)
- * rather than `MainGroup()`, so future versions can add more groups and map
- * specific token functions to different authorities without changing the
- * operation helpers' call shape.
+ * rather than `MainGroup()`. The contract owner can append more groups and
+ * remap specific token functions to them with token config updates.
  *
  * SDK methods: new DataContract({ ... }), dataContract.groups = {...},
  * sdk.contracts.publish(...)
@@ -73,14 +72,17 @@ export const GROUP_DEFINITIONS = {
 export type PanelKind = keyof typeof GROUP_DEFINITIONS;
 export type PanelActionKind = "freeze" | "unfreeze" | "destroy";
 
-export const PANEL_ACTION_GROUPS: Record<PanelActionKind, PanelKind> = {
-  freeze: "access",
-  unfreeze: "access",
-  destroy: "revocation",
+export const DEFAULT_PANEL_ACTION_GROUP_POSITIONS: Record<
+  PanelActionKind,
+  number
+> = {
+  freeze: ACCESS_GROUP_POSITION,
+  unfreeze: ACCESS_GROUP_POSITION,
+  destroy: REVOCATION_GROUP_POSITION,
 };
 
 export function groupPositionForAction(kind: PanelActionKind): number {
-  return GROUP_DEFINITIONS[PANEL_ACTION_GROUPS[kind]].position;
+  return DEFAULT_PANEL_ACTION_GROUP_POSITIONS[kind];
 }
 
 export const SUBMISSION_SCHEMAS = {
@@ -174,8 +176,8 @@ export function createSiftTokenConfiguration(ownerId: string) {
   const ownerRules = new ChangeControlRules({
     authorizedToMakeChange: contractOwner,
     adminActionTakers: contractOwner,
-    isChangingAuthorizedActionTakersToNoOneAllowed: true,
-    isChangingAdminActionTakersToNoOneAllowed: true,
+    isChangingAuthorizedActionTakersToNoOneAllowed: false,
+    isChangingAdminActionTakersToNoOneAllowed: false,
     isSelfChangingAdminActionTakersAllowed: true,
   });
   const lockedRules = new ChangeControlRules({
@@ -184,11 +186,17 @@ export function createSiftTokenConfiguration(ownerId: string) {
   });
   const accessRules = new ChangeControlRules({
     authorizedToMakeChange: accessGroup,
-    adminActionTakers: accessGroup,
+    adminActionTakers: contractOwner,
+    isChangingAuthorizedActionTakersToNoOneAllowed: false,
+    isChangingAdminActionTakersToNoOneAllowed: false,
+    isSelfChangingAdminActionTakersAllowed: true,
   });
   const revocationRules = new ChangeControlRules({
     authorizedToMakeChange: revocationGroup,
-    adminActionTakers: revocationGroup,
+    adminActionTakers: contractOwner,
+    isChangingAuthorizedActionTakersToNoOneAllowed: false,
+    isChangingAdminActionTakersToNoOneAllowed: false,
+    isSelfChangingAdminActionTakersAllowed: true,
   });
 
   return new TokenConfiguration({
@@ -249,6 +257,15 @@ export function createPanelGroup(
   if (new Set(panelMemberIds).size !== panelMemberIds.length) {
     throw new Error(
       "Sift panel members must be 3 distinct identities (duplicate IDs would collapse the group below 3 signers)",
+    );
+  }
+  if (
+    !Number.isInteger(requiredPower) ||
+    requiredPower < 1 ||
+    requiredPower > 3
+  ) {
+    throw new Error(
+      `Sift panel required power must be 1, 2, or 3, got ${requiredPower}`,
     );
   }
   const members = new Map<string, number>(panelMemberIds.map((id) => [id, 1]));

@@ -34,11 +34,15 @@ export interface DashDocumentTokenPaymentInfo {
 
 export interface DashContractLike {
   version?: number;
-  groups?: Record<
-    number,
-    { members: Map<string, number>; requiredPower: number }
-  >;
-  tokens?: Record<number, { mainControlGroup?: number }>;
+  id?: string | { toString(): string };
+  ownerId?: string | { toString(): string };
+  $ownerId?: string | { toString(): string };
+  groups?:
+    | Record<number, { members: Map<string, number>; requiredPower: number }>
+    | Map<number, { members: Map<string, number>; requiredPower: number }>;
+  tokens?:
+    | Record<number, Record<string, unknown>>
+    | Map<number, Record<string, unknown>>;
   toJSON?: () => Record<string, unknown>;
   [key: string]: unknown;
 }

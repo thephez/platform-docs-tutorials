@@ -91,10 +91,23 @@ describe("Sift token configuration", () => {
 
     const config = createSiftTokenConfiguration("owner-1") as unknown as {
       options: {
-        freezeRules: { options: { authorizedToMakeChange: unknown } };
-        unfreezeRules: { options: { authorizedToMakeChange: unknown } };
+        freezeRules: {
+          options: {
+            authorizedToMakeChange: unknown;
+            adminActionTakers: unknown;
+          };
+        };
+        unfreezeRules: {
+          options: {
+            authorizedToMakeChange: unknown;
+            adminActionTakers: unknown;
+          };
+        };
         destroyFrozenFundsRules: {
-          options: { authorizedToMakeChange: unknown };
+          options: {
+            authorizedToMakeChange: unknown;
+            adminActionTakers: unknown;
+          };
         };
       };
     };
@@ -114,6 +127,17 @@ describe("Sift token configuration", () => {
     ).toEqual({
       type: "Group",
       position: REVOCATION_GROUP_POSITION,
+    });
+    expect(config.options.freezeRules.options.adminActionTakers).toEqual({
+      type: "ContractOwner",
+    });
+    expect(config.options.unfreezeRules.options.adminActionTakers).toEqual({
+      type: "ContractOwner",
+    });
+    expect(
+      config.options.destroyFrozenFundsRules.options.adminActionTakers,
+    ).toEqual({
+      type: "ContractOwner",
     });
   });
 
@@ -168,6 +192,16 @@ describe("Sift panel groups", () => {
       /exactly 3/,
     );
     expect(() => createPanelGroup(["a", "a", "b"], 2)).toThrow(/distinct/);
+  });
+
+  it("rejects panel thresholds outside 1-of-3 through 3-of-3", async () => {
+    const { createPanelGroup } = await import("../src/dash/contract");
+    expect(() => createPanelGroup(["a", "b", "c"], 0)).toThrow(
+      /required power/,
+    );
+    expect(() => createPanelGroup(["a", "b", "c"], 4)).toThrow(
+      /required power/,
+    );
   });
 });
 

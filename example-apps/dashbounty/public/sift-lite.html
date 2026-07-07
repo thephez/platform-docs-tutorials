@@ -178,7 +178,10 @@
 
         <section>
           <h2>Panels</h2>
-          <p class="muted">Access is 2-of-3. Revocation is 3-of-3.</p>
+          <p class="muted">
+            Shows the initial access and revocation groups. Use the React app
+            for dynamic group management.
+          </p>
           <div class="toolbar">
             <button id="refresh-panels-btn" disabled>Refresh</button>
           </div>
@@ -190,7 +193,7 @@
     <script type="module">
       import { DashSDK } from "https://esm.sh/@dashevo/evo-sdk@4.0.0";
 
-      const CONTRACT_ID = null;
+      const CONTRACT_ID = "27awnGucyBQ9odPHX2JB3e2nLVmRMxMcCmiAWpwFaPqb";
       const DOC_TYPE = "submission";
       const ACCESS_GROUP_POSITION = 0;
       const REVOCATION_GROUP_POSITION = 1;

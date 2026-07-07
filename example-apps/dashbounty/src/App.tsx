@@ -4,7 +4,7 @@ import { Toaster } from "sonner";
 import { AccountView } from "./components/AccountView";
 import { AppNotices } from "./components/AppNotices";
 import { MySubmissionsView } from "./components/MySubmissionsView";
-import { PanelView } from "./components/PanelView";
+import { PanelView, type PanelPrefill } from "./components/PanelView";
 import { PanelsView } from "./components/PanelsView";
 import { QueueView } from "./components/QueueView";
 import { SubmitSubmissionForm } from "./components/SubmitSubmissionForm";
@@ -15,6 +15,12 @@ export default function App() {
   const session = useSession();
   const [view, setView] = useState<View>("queue");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [panelPrefill, setPanelPrefill] = useState<PanelPrefill | null>(null);
+
+  const requestPanelAction = (prefill: PanelPrefill) => {
+    setPanelPrefill(prefill);
+    setView("panel");
+  };
 
   useEffect(() => {
     if (session.status === "idle") void session.enterReadOnly();
@@ -40,9 +46,19 @@ export default function App() {
             onSubmitted={() => setRefreshKey((v) => v + 1)}
           />
         )}
-        {view === "queue" && <QueueView key={refreshKey} />}
+        {view === "queue" && (
+          <QueueView
+            key={refreshKey}
+            onRequestPanelAction={requestPanelAction}
+          />
+        )}
         {view === "my-submissions" && <MySubmissionsView />}
-        {view === "panel" && <PanelView />}
+        {view === "panel" && (
+          <PanelView
+            prefill={panelPrefill}
+            onPrefillConsumed={() => setPanelPrefill(null)}
+          />
+        )}
         {view === "panels" && <PanelsView />}
         {view === "account" && <AccountView />}
       </div>

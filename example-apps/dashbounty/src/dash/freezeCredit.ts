@@ -1,9 +1,9 @@
 /**
- * Propose or co-sign a Review Panel suspension of a submitter's Sift tokens.
+ * Propose or co-sign a Sift access suspension of a submitter's tokens.
  *
- * `freezeRules` gates this on the access group (2-of-3). A single call from
- * `sdk.tokens.freeze(...)`
- * covers both roles depending on `groupInfo`:
+ * `freezeRules` gates this on the currently assigned access group. A single
+ * call from `sdk.tokens.freeze(...)` covers both roles depending on
+ * `groupInfo`:
  *   - Proposer (first signer): pass no `actionId`. Uses
  *     `GroupStateTransitionInfoStatus.proposer(groupContractPosition)`,
  *     which creates a new pending group action at power 1 — not yet

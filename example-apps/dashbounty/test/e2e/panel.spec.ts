@@ -36,9 +36,11 @@ test.describe("Sift Review Panel group signing (2-of-3, auth-gated)", () => {
     // Step 1: panelist 1 proposes a suspension on panelist 2
     await loginAs(page, 1);
     await page.getByRole("button", { name: "Review panel" }).click();
-    await expect(page.getByText(/Access actions require/i)).toBeVisible({
-      timeout: 30_000,
-    });
+    await expect(page.getByText(/current Sift function-to-group/i)).toBeVisible(
+      {
+        timeout: 30_000,
+      },
+    );
 
     await page.getByLabel("Action").selectOption("freeze");
     await page.getByLabel("Target identity ID").fill(target);

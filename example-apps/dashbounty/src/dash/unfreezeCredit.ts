@@ -1,12 +1,12 @@
 /**
- * Propose or co-sign a Review Panel restoration of suspended access.
+ * Propose or co-sign a Sift restoration of suspended access.
  *
  * Same propose/co-sign unification as freezeCredit.ts — see that file's
  * header for the full explanation of `groupInfo`. This is the safety valve:
  * if the panel suspended the wrong submitter (or new evidence clears them),
  * unfreeze restores their ability to spend Sift tokens without requiring
- * a revocation action. `unfreezeRules` is gated on the same access group
- * as suspend.
+ * a revocation action. `unfreezeRules` is gated on the currently assigned
+ * restore authority, which defaults to the same group as suspend.
  *
  * SDK method: sdk.tokens.unfreeze({ ..., groupInfo })
  */

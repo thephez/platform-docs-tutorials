@@ -131,10 +131,11 @@ export function AccountView() {
           </button>
         </div>
         <p className="muted" style={{ marginTop: "0.5rem" }}>
-          Registering creates a fresh Sift token and two Review Panel groups
-          from VITE_PANELIST_1_ID/_2_ID/_3_ID: 2-of-3 for suspend/restore and
-          3-of-3 for revoking suspended tokens. The signing identity receives
-          the initial 100 Sift tokens.
+          Registering creates a fresh Sift token and two initial groups from
+          VITE_PANELIST_1_ID/_2_ID/_3_ID: 2-of-3 for suspend/restore and 3-of-3
+          for revoking suspended tokens. The owner can add groups and remap
+          token functions later. The signing identity receives the initial 100
+          Sift tokens.
         </p>
       </div>
 

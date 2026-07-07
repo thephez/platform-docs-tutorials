@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { CopyableId } from "./CopyableId";
-import { groupPositionForAction, type PanelActionKind } from "../dash/contract";
+import { type PanelActionKind } from "../dash/contract";
 import { destroyFrozenCredit } from "../dash/destroyFrozenCredit";
 import {
   describeGroupAction,
@@ -11,17 +11,23 @@ import {
   type PendingAction,
 } from "../dash/groupActions";
 import { freezeCredit } from "../dash/freezeCredit";
+import { fetchSiftGovernance, type SiftGovernance } from "../dash/governance";
 import { errorMessage } from "../dash/logger";
 import {
-  fetchPanels,
   isPanelMember,
-  panelKindForAction,
+  panelForAction,
+  panelsFromGovernance,
   type PanelInfo,
 } from "../dash/panel";
 import { unfreezeCredit } from "../dash/unfreezeCredit";
 import { useSession } from "../session/useSession";
 
 type UiPendingAction = PendingAction & { panel: PanelInfo };
+
+export interface PanelPrefill {
+  kind: PanelActionKind;
+  targetIdentityId: string;
+}
 
 function actionKindFromName(eventName: string): PanelActionKind | null {
   const lower = eventName.toLowerCase();
@@ -55,8 +61,15 @@ async function runAction(
   return destroyFrozenCredit(args);
 }
 
-export function PanelView() {
+export function PanelView({
+  prefill,
+  onPrefillConsumed,
+}: {
+  prefill?: PanelPrefill | null;
+  onPrefillConsumed?: () => void;
+} = {}) {
   const session = useSession();
+  const [governance, setGovernance] = useState<SiftGovernance | null>(null);
   const [panels, setPanels] = useState<PanelInfo[]>([]);
   const [pending, setPending] = useState<UiPendingAction[]>([]);
   const [signerProgress, setSignerProgress] = useState<
@@ -65,18 +78,27 @@ export function PanelView() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const [proposeKind, setProposeKind] = useState<PanelActionKind>("freeze");
-  const [targetIdentityId, setTargetIdentityId] = useState("");
+  // PanelView remounts each time the Review Panel tab is entered, so a queue
+  // card's requested action can seed the propose form as initial state.
+  const [proposeKind, setProposeKind] = useState<PanelActionKind>(
+    prefill?.kind ?? "freeze",
+  );
+  const [targetIdentityId, setTargetIdentityId] = useState(
+    prefill?.targetIdentityId ?? "",
+  );
   const [note, setNote] = useState("");
   const [cosignTargets, setCosignTargets] = useState<Record<string, string>>(
     {},
   );
 
-  const panelsByKind = useMemo(
-    () => new Map(panels.map((panel) => [panel.kind, panel])),
-    [panels],
+  const assignments = governance?.assignments;
+  const proposePanel = useMemo(
+    () =>
+      assignments
+        ? panelForAction(panels, assignments, proposeKind)
+        : undefined,
+    [assignments, panels, proposeKind],
   );
-  const proposePanel = panelsByKind.get(panelKindForAction(proposeKind));
   const canPropose =
     proposePanel && session.identityId
       ? isPanelMember(proposePanel, session.identityId)
@@ -86,10 +108,13 @@ export function PanelView() {
     if (!session.sdk || !session.contractId) return;
     setError(null);
     try {
-      const nextPanels = await fetchPanels({
+      const nextGovernance = await fetchSiftGovernance({
         sdk: session.sdk,
         contractId: session.contractId,
+        log: session.log,
       });
+      setGovernance(nextGovernance);
+      const nextPanels = panelsFromGovernance(nextGovernance);
       setPanels(nextPanels);
 
       const pendingWithPanels: UiPendingAction[] = [];
@@ -132,9 +157,18 @@ export function PanelView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.sdk, session.contractId]);
 
+  // The prefill was seeded into initial form state above; clear it in the
+  // parent on mount so re-entering the tab later starts from a blank form.
+  useEffect(() => {
+    if (prefill) onPrefillConsumed?.();
+    // Run once on mount: initial state already captured the prefill.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function handlePropose(event: React.FormEvent) {
     event.preventDefault();
     if (!session.sdk || !session.keyManager || !session.contractId) return;
+    if (!assignments) return;
     setBusy(true);
     setError(null);
     try {
@@ -142,7 +176,7 @@ export function PanelView() {
         sdk: session.sdk,
         keyManager: session.keyManager,
         contractId: session.contractId,
-        groupPosition: groupPositionForAction(proposeKind),
+        groupPosition: assignments[proposeKind],
         frozenIdentityId: targetIdentityId.trim(),
         publicNote: note.trim() || undefined,
         log: session.log,
@@ -196,16 +230,22 @@ export function PanelView() {
   return (
     <div>
       {error && <div className="notice error">{error}</div>}
+      {governance?.usedFallbackAssignments && (
+        <div className="notice info">
+          Function assignment metadata could not be fully read. Using Sift's
+          default group mapping.
+        </div>
+      )}
 
       <div className="card">
         <h3>Review Panel</h3>
         <p className="muted">
-          Access actions require the 2-of-3 Access Panel. Revoking suspended
-          tokens requires the stricter 3-of-3 Revocation Panel.
+          Panel actions use the current Sift function-to-group assignments.
+          Access can be reassigned independently from permanent revocation.
         </p>
         <div className="list">
           {panels.map((panel) => (
-            <div key={panel.kind} className="card">
+            <div key={panel.groupPosition} className="card">
               <div className="row between">
                 <strong>{panel.label}</strong>
                 <span className="muted">
@@ -232,7 +272,7 @@ export function PanelView() {
         </p>
       )}
 
-      {canPropose && (
+      {assignments && canPropose && (
         <div className="card">
           <h3>Propose an action</h3>
           <form onSubmit={handlePropose}>

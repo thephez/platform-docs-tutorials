@@ -1,5 +1,5 @@
 /**
- * Propose or co-sign a Revocation Panel action that permanently revokes a
+ * Propose or co-sign a revocation-authority action that permanently revokes a
  * submitter's suspended Sift tokens.
  *
  * Same propose/co-sign unification as freezeCredit.ts — see that file's

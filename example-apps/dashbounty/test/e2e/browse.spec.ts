@@ -31,7 +31,7 @@ test.describe("Read-only browsing (no auth required)", () => {
   test("Panels view renders without signing in", async ({ page }) => {
     await page.getByRole("button", { name: "Panels" }).click();
     await expect(
-      page.getByText(/Sift panels|Configure a Sift contract first/),
+      page.getByText(/Sift groups|Configure a Sift contract first/),
     ).toBeVisible();
   });
 });

@@ -35,8 +35,8 @@ describe("freezeCredit — propose vs co-sign branching", () => {
       sdk: { tokens: { freeze } } as never,
       keyManager: makeKeyManager(),
       contractId: "contract-1",
-      // A non-zero position proves the helper uses the SUPPLIED active
-      // group position (post-rotation reality), not the founding group 0.
+      // A non-zero position proves the helper uses the supplied assigned
+      // group position, not the founding group 0.
       groupPosition: 2,
       frozenIdentityId: "bad-actor-1",
     });

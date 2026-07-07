@@ -11,10 +11,11 @@ const STORAGE_KEY = "sift.contractId";
 
 /**
  * Default contract ID baked into the tutorial so browse-only mode works on
- * a fresh machine without any setup. Sift is still a PoC, so this starts
- * null until a fresh submission-based contract is published.
+ * a fresh machine without any setup. Points at the published submission-based
+ * Sift contract on testnet.
  */
-export const DEFAULT_CONTRACT_ID: string | null = null;
+export const DEFAULT_CONTRACT_ID: string | null =
+  "27awnGucyBQ9odPHX2JB3e2nLVmRMxMcCmiAWpwFaPqb";
 
 export function loadStoredContractId(): string | null {
   return localStorage.getItem(STORAGE_KEY) ?? DEFAULT_CONTRACT_ID;
