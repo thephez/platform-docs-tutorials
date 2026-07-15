@@ -290,6 +290,79 @@ describe("GovernanceView", () => {
     );
   });
 
+  it("blocks a second append while the first submission is in flight", async () => {
+    const governanceSnapshot = governance({ groups: [], rules: [] });
+    const session = authenticatedSession();
+    vi.mocked(useSession).mockReturnValue(session as never);
+    vi.mocked(fetchTokenOpsGovernance).mockResolvedValue(governanceSnapshot);
+
+    let resolveAppend: ((value: unknown) => void) | undefined;
+    vi.mocked(appendTokenOpsGroup).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveAppend = resolve;
+        }),
+    );
+
+    render(<GovernanceView />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Groups" }));
+    fireEvent.change(screen.getByLabelText("Member identity IDs"), {
+      target: { value: "member-b member-c" },
+    });
+    fireEvent.change(screen.getByLabelText("Required power"), {
+      target: { value: "2" },
+    });
+
+    const form = screen
+      .getByRole("button", { name: "Append group" })
+      .closest("form")!;
+    // Dispatch both submits immediately, before any waitFor/rerender. A
+    // state-only mutex would let both pass and produce two getAuth /
+    // appendTokenOpsGroup calls; the ref mutex must keep each at one.
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+
+    await waitFor(() => {
+      expect(session.keyManager.getAuth).toHaveBeenCalledOnce();
+      expect(appendTokenOpsGroup).toHaveBeenCalledOnce();
+    });
+
+    expect(screen.getByRole("button", { name: "Appending..." })).toBeTruthy();
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Appending...",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByLabelText("Member identity IDs") as HTMLTextAreaElement)
+        .disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByLabelText("Required power") as HTMLInputElement).disabled,
+    ).toBe(true);
+
+    // Still only one in-flight operation after the UI has reflected busy state.
+    fireEvent.submit(
+      screen.getByRole("button", { name: "Appending..." }).closest("form")!,
+    );
+    expect(session.keyManager.getAuth).toHaveBeenCalledOnce();
+    expect(appendTokenOpsGroup).toHaveBeenCalledOnce();
+
+    resolveAppend?.({});
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Append group" })).toBeTruthy(),
+    );
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Append group",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+  });
+
   it("surfaces append-group validation errors", async () => {
     const session = authenticatedSession();
     vi.mocked(useSession).mockReturnValue(session as never);

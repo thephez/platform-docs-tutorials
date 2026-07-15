@@ -126,6 +126,10 @@ export function GovernanceView() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [busyRuleKey, setBusyRuleKey] = useState<string | null>(null);
+  // State drives the disabled/loading UI; the ref is the real mutex so two
+  // submits that land before the next render cannot both pass the guard.
+  const [appendingGroup, setAppendingGroup] = useState(false);
+  const appendInFlightRef = useRef(false);
   const [activeView, setActiveView] = useState<GovernanceSubView>("access");
   const [groupSearch, setGroupSearch] = useState("");
   const [groupFilter, setGroupFilter] = useState<GroupFilter>("all");
@@ -234,6 +238,14 @@ export function GovernanceView() {
       setError("Only the contract owner can append an approval group.");
       return;
     }
+    // Synchronous mutex before the first await. React state alone is not
+    // enough: two submits dispatched before the next render both see
+    // appendingGroup === false. Platform groups are immutable, so a
+    // duplicate would stick at a new position.
+    if (appendInFlightRef.current) return;
+    appendInFlightRef.current = true;
+    setAppendingGroup(true);
+    setError(null);
     try {
       const { identityKey, signer } = await session.keyManager.getAuth();
       await appendTokenOpsGroup({
@@ -249,6 +261,9 @@ export function GovernanceView() {
       await refresh();
     } catch (err) {
       setError(errorMessage(err));
+    } finally {
+      appendInFlightRef.current = false;
+      setAppendingGroup(false);
     }
   }
 
@@ -299,6 +314,7 @@ export function GovernanceView() {
 
   const canAppendGroup =
     isAuthenticated && signedInIdentityId === contractOwnerId;
+  const appendFormDisabled = !canAppendGroup || appendingGroup;
   const identityIds = useMemo(
     () => [
       signedInIdentityId,
@@ -920,7 +936,7 @@ export function GovernanceView() {
                       id="new-members"
                       rows={2}
                       value={newMembers}
-                      disabled={!canAppendGroup}
+                      disabled={appendFormDisabled}
                       onChange={(e) => setNewMembers(e.target.value)}
                       placeholder="comma or space separated"
                     />
@@ -937,7 +953,7 @@ export function GovernanceView() {
                       min={1}
                       max={appendMemberCount || undefined}
                       value={newRequiredPower}
-                      disabled={!canAppendGroup}
+                      disabled={appendFormDisabled}
                       onChange={(e) => setNewRequiredPower(e.target.value)}
                     />
                     <p className="muted">
@@ -945,8 +961,8 @@ export function GovernanceView() {
                       {appendMemberCount || MIN_GROUP_MEMBERS}).
                     </p>
                   </div>
-                  <button type="submit" disabled={!canAppendGroup}>
-                    Append group
+                  <button type="submit" disabled={appendFormDisabled}>
+                    {appendingGroup ? "Appending..." : "Append group"}
                   </button>
                 </form>
               </div>
