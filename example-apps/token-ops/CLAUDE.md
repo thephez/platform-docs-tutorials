@@ -90,7 +90,10 @@ Remember a `ChangeControlRules` object has two authorities: `authorizedToMakeCha
 
 ## Limitations
 
-The authoritative, user-facing limitations list lives in [README.md](README.md#limitations) — keep the two in sync when you change scope. The one item worth restating here for contributors: **reassignment only touches the operator (`authorizedToMakeChange`), never the admin (`adminActionTakers`).** The reassign modal is titled "Reassign operator" and `configurationChangeItemForRule` only builds operator changes; the admin column in the Governance matrix is read-only.
+The authoritative, user-facing limitations list lives in [README.md](README.md#limitations) — keep the two in sync when you change scope. Two items worth restating here for contributors:
+
+- **Reassignment only touches the operator (`authorizedToMakeChange`), never the admin (`adminActionTakers`).** The reassign modal is titled "Reassign operator" and `configurationChangeItemForRule` only builds operator changes; the admin column in the Governance matrix is read-only.
+- **Group-admin reassignment is not supported.** `hasAuthority` only enables direct `configUpdate` for `ContractOwner` / `Identity` admins. Group admins need a propose/co-sign path (`groupInfo` + pending configuration actions) that TokenOps does not implement yet, so group membership must not unlock the confirm button.
 
 ## Bootstrap script
 

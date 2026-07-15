@@ -127,6 +127,7 @@ Within group governance itself, a few things are intentionally not exercised in 
 - **Appended groups always use unit voting power.** The Governance → Groups "Append group" form takes a member list and a single required-power threshold, so every group it creates gives each member power `1`. The read/display side handles weighted power generally (see `usesOnePowerPerSignature` in [`PendingActionsView.tsx`](src/components/PendingActionsView.tsx)), but there's no form field to assign disparate per-member power.
 - **Capabilities can only be reassigned to a `Group`.** The reassign control lists existing groups only, and `configurationChangeItemForRule` ([`tokenOperations.ts`](src/dash/tokenOperations.ts)) always builds `AuthorizedActionTakers.Group(...)`. The matrix reads and displays ContractOwner, Identity, MainGroup, and NoOne authorities, but the app can't assign to (or away from) them.
 - **Only the operator authority is reassignable, not the admin.** Reassignment changes `authorizedToMakeChange` (who performs the action); it never changes `adminActionTakers` (who can later reassign the operator), which is displayed but not editable.
+- **Group-admin reassignment is not supported yet.** Direct `configUpdate` only works when the rule admin is `ContractOwner` or a specific `Identity`. If `adminActionTakers` is a Group, the reassign modal stays inspect-only until TokenOps implements the multi-signer propose/co-sign lifecycle for configuration updates.
 
 ## Reading this codebase
 

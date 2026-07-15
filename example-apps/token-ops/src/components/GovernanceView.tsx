@@ -269,6 +269,13 @@ export function GovernanceView() {
     (group) => `Group ${group.groupPosition}`,
   );
 
+  /**
+   * Whether the signed-in identity can submit a *direct* admin config update
+   * for this authority. Group admins are intentionally false until TokenOps
+   * supports the propose → co-sign lifecycle for group-managed config updates
+   * (`assignTokenFunctionGroup` has no `groupInfo` / actionId path, and
+   * PendingActionsView does not execute configuration proposals).
+   */
   function hasAuthority(authority: RuleAuthority): boolean {
     if (!isAuthenticated || !signedInIdentityId) return false;
     switch (authority.type) {
@@ -277,14 +284,17 @@ export function GovernanceView() {
       case "Identity":
         return signedInIdentityId === authority.identityId;
       case "Group":
-        return Boolean(
-          groups
-            .find((group) => group.groupPosition === authority.groupPosition)
-            ?.members.has(signedInIdentityId),
-        );
+        // Group membership alone is not enough for a direct configUpdate —
+        // Platform requires a multi-signer group action that this app does
+        // not yet implement for reassignment.
+        return false;
       default:
         return false;
     }
+  }
+
+  function groupAdminSubmissionUnsupported(authority: RuleAuthority): boolean {
+    return authority.type === "Group";
   }
 
   const canAppendGroup =
@@ -538,6 +548,7 @@ export function GovernanceView() {
         : "";
     const isNoOp = chosen === currentValue;
     const canSubmit = hasAuthority(rule.admin);
+    const groupAdminUnsupported = groupAdminSubmissionUnsupported(rule.admin);
     const category = ruleCategory(rule.key);
 
     return (
@@ -599,19 +610,21 @@ export function GovernanceView() {
             </label>
             {chosenGroupInfo && (
               <p className="reassign-warning">
-                {!canSubmit
-                  ? isAuthenticated
-                    ? "You can inspect this change, but this identity does not have the admin authority required to submit it."
-                    : "You can inspect this change, but you must sign in with an identity that has admin authority to submit it."
-                  : isNoOp
-                    ? "Choose a different group to reassign this capability."
-                    : `${rule.label} will move from ${authorityLabel(
-                        rule.operator,
-                      )} to Group ${chosenGroupInfo.groupPosition}. ${
-                        rule.operator.type === "Group"
-                          ? `Group ${rule.operator.groupPosition} members lose the ability to perform this action.`
-                          : ""
-                      }`}
+                {groupAdminUnsupported
+                  ? "You can inspect this change, but group-admin reassignment is not supported yet. TokenOps only submits direct config updates for ContractOwner or Identity admins; group-managed reassignment needs a propose and co-sign lifecycle that is not implemented."
+                  : !canSubmit
+                    ? isAuthenticated
+                      ? "You can inspect this change, but this identity does not have the admin authority required to submit it."
+                      : "You can inspect this change, but you must sign in with an identity that has admin authority to submit it."
+                    : isNoOp
+                      ? "Choose a different group to reassign this capability."
+                      : `${rule.label} will move from ${authorityLabel(
+                          rule.operator,
+                        )} to Group ${chosenGroupInfo.groupPosition}. ${
+                          rule.operator.type === "Group"
+                            ? `Group ${rule.operator.groupPosition} members lose the ability to perform this action.`
+                            : ""
+                        }`}
               </p>
             )}
           </div>

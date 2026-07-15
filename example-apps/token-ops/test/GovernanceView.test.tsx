@@ -431,4 +431,100 @@ describe("GovernanceView", () => {
       ).disabled,
     ).toBe(true);
   });
+
+  it("disables group-admin reassignment until propose/co-sign is supported", async () => {
+    vi.mocked(useSession).mockReturnValue(
+      authenticatedSession("member-b") as never,
+    );
+    vi.mocked(fetchTokenOpsGovernance).mockResolvedValue(
+      governance(
+        {
+          groups: [
+            {
+              groupPosition: 1,
+              members: new Map([
+                ["member-b", 1],
+                ["member-c", 1],
+              ]),
+              requiredPower: 2,
+            },
+            {
+              groupPosition: 2,
+              members: new Map([["member-d", 1]]),
+              requiredPower: 1,
+            },
+          ],
+          rules: [
+            {
+              ...groupRule("freeze", 1),
+              admin: { type: "Group", groupPosition: 1 },
+            },
+          ],
+        },
+        "owner-1",
+      ),
+    );
+
+    render(<GovernanceView />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("New operator group"), {
+      target: { value: "2" },
+    });
+    expect(
+      screen.getByText(/group-admin reassignment is not supported yet/),
+    ).toBeTruthy();
+    const confirm = screen.getByRole("button", {
+      name: "Confirm reassignment",
+    }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.click(confirm);
+    expect(assignTokenFunctionGroup).not.toHaveBeenCalled();
+  });
+
+  it("still lets a ContractOwner admin submit a direct reassignment", async () => {
+    const session = authenticatedSession("owner-1");
+    vi.mocked(useSession).mockReturnValue(session as never);
+    vi.mocked(fetchTokenOpsGovernance).mockResolvedValue(
+      governance(
+        {
+          groups: [
+            {
+              groupPosition: 1,
+              members: new Map([["member-a", 1]]),
+              requiredPower: 1,
+            },
+            {
+              groupPosition: 2,
+              members: new Map([["member-b", 1]]),
+              requiredPower: 1,
+            },
+          ],
+          rules: [groupRule("freeze", 1)],
+        },
+        "owner-1",
+      ),
+    );
+    vi.mocked(assignTokenFunctionGroup).mockResolvedValue({} as never);
+
+    render(<GovernanceView />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("New operator group"), {
+      target: { value: "2" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Confirm reassignment" }),
+    );
+
+    await waitFor(() =>
+      expect(assignTokenFunctionGroup).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ownerId: "owner-1",
+          ruleKind: "freeze",
+          groupPosition: 2,
+        }),
+      ),
+    );
+  });
 });
