@@ -99,6 +99,8 @@ The authoritative, user-facing limitations list lives in [README.md](README.md#l
 
 `npm run bootstrap:identities` ([scripts/bootstrap-identities.mjs](scripts/bootstrap-identities.mjs)) registers four identities from one mnemonic. Each `identityIndex` (0–3) is a distinct DIP-13 path, so one mnemonic yields four genuinely distinct, independently-registerable identities — it saves managing four seed phrases, **not** the on-chain cost (each still needs its own funded identity-create tx).
 
+**Prerequisite:** a repository-root `npm install` (in addition to this app's local `npm install`). The script loads `../../../setupDashClient.mjs` and imports `Identity`/`Identifier` from `../../../node_modules/@dashevo/evo-sdk/...` so it shares the same SDK module instance as the root tutorials. App-local deps alone leave those paths missing (`ERR_MODULE_NOT_FOUND`). User-facing wording lives in [README.md](README.md#group-members).
+
 - Reads `PLATFORM_MNEMONIC` from the **repo-root** `.env` (loaded via `dotenv` before `setupDashClient.mjs`'s own `dotenv.config()`).
 - Writes the three member IDs to **`token-ops/.env`** as `VITE_TOKEN_OPS_MEMBER_1_ID` / `_2_ID` / `_3_ID` (owner index 0 gets no env key). The Settings tab defaults its register-contract group members to these.
 - Imports `Identity`/`Identifier` from the **repo-root** SDK copy (not the bare specifier) to avoid a dual-module `instanceof` break under Node 22.

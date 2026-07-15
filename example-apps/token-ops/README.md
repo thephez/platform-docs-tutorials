@@ -9,11 +9,12 @@ The app is built around the idea that a token action has two authorities: an **o
 - Node 22.22+ (`engines.node` pins `>=22.22.0 <22.23.0`)
 - **Browse-only mode needs nothing** — a default contract is baked in, so a fresh install can read the token, groups, and rule matrix without any identity.
 - Writing needs a funded Dash Platform testnet identity (BIP-39 mnemonic + identity index).
-- Exercising the **group signing flow** end-to-end needs three additional funded identities (the group members). `npm run bootstrap:identities` derives and funds all four from one mnemonic — see [Group members](#group-members).
+- Exercising the **group signing flow** end-to-end needs three additional funded identities (the group members). `npm run bootstrap:identities` derives and funds all four from one mnemonic — see [Group members](#group-members). That bootstrap path also requires a **repository-root `npm install`** (in addition to this app's local install) so `setupDashClient.mjs` and the shared root `@dashevo/evo-sdk` copy resolve — see [Group members](#group-members).
 
 ## Quick start
 
 ```bash
+# From this directory (example-apps/token-ops):
 npm install
 npm run dev
 ```
@@ -73,9 +74,16 @@ These thresholds describe the **initial** contract. Platform groups are immutabl
 
 ## Group members
 
-The group-signing flow needs three additional funded identities. The bootstrap script derives four identities (owner + three members) from a single `PLATFORM_MNEMONIC` — each identity index is a distinct DIP-13 path, so one mnemonic yields four independently-registerable, independently-funded identities:
+The group-signing flow needs three additional funded identities. The bootstrap script derives four identities (owner + three members) from a single `PLATFORM_MNEMONIC` — each identity index is a distinct DIP-13 path, so one mnemonic yields four independently-registerable, independently-funded identities.
+
+**Root install is required for bootstrap.** `scripts/bootstrap-identities.mjs` imports the repo-root `setupDashClient.mjs` helper and the root `@dashevo/evo-sdk` package (not this app's local copy) so Node 22 keeps a single module instance for `instanceof` checks inside the SDK. An app-local `npm install` alone is not enough — without root `node_modules`, bootstrap fails with `ERR_MODULE_NOT_FOUND` for the root SDK path.
 
 ```bash
+# From the repository root (once per clone):
+npm install
+
+# Then from this directory:
+npm install          # if you have not already for the Vite app
 npm run bootstrap:identities
 ```
 
