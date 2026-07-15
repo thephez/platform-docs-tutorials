@@ -123,7 +123,7 @@ Group-managed operations (everything except direct transfer) follow propose → 
 2. Other members **co-sign** the same action — the same call with `GroupStateTransitionInfoStatus.otherSigner(groupPosition, actionId)`.
 3. When accumulated signing power reaches the group's required power, Platform **executes** it automatically.
 
-The Actions tab surfaces ACTIVE actions (`sdk.group.actions`) below the proposal form, shows "N of M" signing progress (`sdk.group.actionSigners`), and splits them into "needs your signature" vs "waiting on others".
+The Actions tab surfaces ACTIVE actions (`sdk.group.actions`) below the proposal form, shows "N of M" signing progress (`sdk.group.actionSigners`), and splits them into "needs your signature" vs "waiting on others". Each group is loaded with a single query capped at 100 ACTIVE actions (`PENDING_ACTIONS_QUERY_LIMIT` in [`groupActions.ts`](src/dash/groupActions.ts)); later proposals beyond that cap are not listed.
 
 ## Limitations
 
@@ -136,6 +136,7 @@ Within group governance itself, a few things are intentionally not exercised in 
 - **Capabilities can only be reassigned to a `Group`.** The reassign control lists existing groups only, and `configurationChangeItemForRule` ([`tokenOperations.ts`](src/dash/tokenOperations.ts)) always builds `AuthorizedActionTakers.Group(...)`. The matrix reads and displays ContractOwner, Identity, MainGroup, and NoOne authorities, but the app can't assign to (or away from) them.
 - **Only the operator authority is reassignable, not the admin.** Reassignment changes `authorizedToMakeChange` (who performs the action); it never changes `adminActionTakers` (who can later reassign the operator), which is displayed but not editable.
 - **Group-admin reassignment is not supported yet.** Direct `configUpdate` only works when the rule admin is `ContractOwner` or a specific `Identity`. If `adminActionTakers` is a Group, the reassign modal stays inspect-only until TokenOps implements the multi-signer propose/co-sign lifecycle for configuration updates.
+- **Pending actions are limited to 100 ACTIVE proposals per group.** The queue issues one `sdk.group.actions` call with `limit: 100` and does not paginate further pages, so older/later proposals beyond that window are not shown.
 
 ## Reading this codebase
 

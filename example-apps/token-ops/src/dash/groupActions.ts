@@ -206,72 +206,45 @@ export function parsePendingTokenActionParams(
 }
 
 /**
- * Default page size for `sdk.group.actions`. Exposed for tests that assert
- * multi-page pagination behaviour.
+ * Hard cap on ACTIVE actions returned per group. TokenOps issues a single
+ * `sdk.group.actions` query (no cursor pagination), so later proposals beyond
+ * this limit are not shown.
  */
-export const PENDING_ACTIONS_PAGE_LIMIT = 100;
-
-/**
- * Safety cap on pagination rounds. Prevents an unbounded loop if the SDK
- * cursor never advances (e.g. a buggy inclusive startAt response).
- */
-const MAX_PENDING_ACTION_PAGES = 1000;
+export const PENDING_ACTIONS_QUERY_LIMIT = 100;
 
 export async function listPendingActions({
   sdk,
   contractId,
   groupPosition,
   log,
-  limit = PENDING_ACTIONS_PAGE_LIMIT,
 }: {
   sdk: DashSdk;
   contractId: string;
   /** Explicit group position for this action family. */
   groupPosition: number;
   log?: Logger;
-  /** Page size forwarded to `sdk.group.actions` (default 100). */
-  limit?: number;
 }): Promise<PendingAction[]> {
   log?.("Loading pending group actions...");
+  // One query only — TokenOps does not walk `startAt` pages. The explicit
+  // limit documents the UI surface: up to PENDING_ACTIONS_QUERY_LIMIT ACTIVE
+  // actions per group.
+  const actions = await sdk.group.actions({
+    dataContractId: contractId,
+    groupContractPosition: groupPosition,
+    status: "ACTIVE",
+    limit: PENDING_ACTIONS_QUERY_LIMIT,
+  });
+
   const pending: PendingAction[] = [];
-  const seenActionIds = new Set<string>();
-  let startAt: { actionId: string; included?: boolean } | undefined;
-  let pages = 0;
-
-  while (pages < MAX_PENDING_ACTION_PAGES) {
-    pages += 1;
-    const actions = await sdk.group.actions({
-      dataContractId: contractId,
-      groupContractPosition: groupPosition,
-      status: "ACTIVE",
-      limit,
-      ...(startAt ? { startAt } : {}),
+  for (const [actionId, action] of actions) {
+    if (!action) continue;
+    pending.push({
+      actionId,
+      proposerId: action.proposerId.toString(),
+      eventName: action.event.eventName(),
+      params: parsePendingTokenActionParams(action),
     });
-
-    let pageCount = 0;
-    let lastActionId: string | null = null;
-    for (const [actionId, action] of actions) {
-      pageCount += 1;
-      lastActionId = actionId;
-      if (!action || seenActionIds.has(actionId)) continue;
-      seenActionIds.add(actionId);
-      pending.push({
-        actionId,
-        proposerId: action.proposerId.toString(),
-        eventName: action.event.eventName(),
-        params: parsePendingTokenActionParams(action),
-      });
-    }
-
-    // A short page means the server has no further results.
-    if (pageCount < limit || lastActionId === null) break;
-
-    // Advance past the last id on this page. SDK default for `included` is
-    // false, but we set it explicitly so a future default change cannot
-    // re-include the cursor and stall pagination.
-    startAt = { actionId: lastActionId, included: false };
   }
-
   log?.(`Found ${pending.length} pending action(s).`);
   return pending;
 }
