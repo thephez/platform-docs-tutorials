@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   describeGroupAction,
   listActionSigners,
+  listPendingActions,
   parsePendingTokenActionParams,
 } from "../src/dash/groupActions";
 
@@ -217,6 +218,156 @@ describe("describeGroupAction", () => {
 
   it("falls back to the raw name for unrecognized events", () => {
     expect(describeGroupAction("SomethingElse")).toBe("SomethingElse");
+  });
+});
+
+function makeAction(actionId: string, proposerId = "proposer-1") {
+  return {
+    proposerId: { toString: () => proposerId },
+    event: {
+      eventName: () => "TokenMintEvent",
+      tokenEvent: () => ({
+        toJSON: () => ({
+          type: "mint",
+          data: ["1", "recipient-1", null],
+        }),
+      }),
+    },
+  };
+}
+
+describe("listPendingActions", () => {
+  it("returns a single short page without requesting a cursor", async () => {
+    const actions = vi.fn().mockResolvedValue(
+      new Map([
+        ["action-1", makeAction("action-1")],
+        ["action-2", makeAction("action-2", "proposer-2")],
+      ]),
+    );
+
+    const pending = await listPendingActions({
+      sdk: { group: { actions } } as never,
+      contractId: "contract-1",
+      groupPosition: 0,
+      limit: 10,
+    });
+
+    expect(actions).toHaveBeenCalledTimes(1);
+    expect(actions).toHaveBeenCalledWith({
+      dataContractId: "contract-1",
+      groupContractPosition: 0,
+      status: "ACTIVE",
+      limit: 10,
+    });
+    expect(pending.map((entry) => entry.actionId)).toEqual([
+      "action-1",
+      "action-2",
+    ]);
+    expect(pending[0]?.params).toMatchObject({
+      kind: "mint",
+      amount: 1n,
+      recipientId: "recipient-1",
+    });
+  });
+
+  it("pages until a short page and advances startAt with included:false", async () => {
+    const page1 = new Map([
+      ["action-1", makeAction("action-1")],
+      ["action-2", makeAction("action-2")],
+    ]);
+    const page2 = new Map([
+      ["action-3", makeAction("action-3")],
+      ["action-4", makeAction("action-4")],
+    ]);
+    const page3 = new Map([["action-5", makeAction("action-5")]]);
+    const actions = vi
+      .fn()
+      .mockResolvedValueOnce(page1)
+      .mockResolvedValueOnce(page2)
+      .mockResolvedValueOnce(page3);
+
+    const pending = await listPendingActions({
+      sdk: { group: { actions } } as never,
+      contractId: "contract-1",
+      groupPosition: 2,
+      limit: 2,
+    });
+
+    expect(actions).toHaveBeenCalledTimes(3);
+    expect(actions.mock.calls[0][0]).toEqual({
+      dataContractId: "contract-1",
+      groupContractPosition: 2,
+      status: "ACTIVE",
+      limit: 2,
+    });
+    expect(actions.mock.calls[1][0]).toEqual({
+      dataContractId: "contract-1",
+      groupContractPosition: 2,
+      status: "ACTIVE",
+      limit: 2,
+      startAt: { actionId: "action-2", included: false },
+    });
+    expect(actions.mock.calls[2][0]).toEqual({
+      dataContractId: "contract-1",
+      groupContractPosition: 2,
+      status: "ACTIVE",
+      limit: 2,
+      startAt: { actionId: "action-4", included: false },
+    });
+    expect(pending.map((entry) => entry.actionId)).toEqual([
+      "action-1",
+      "action-2",
+      "action-3",
+      "action-4",
+      "action-5",
+    ]);
+  });
+
+  it("deduplicates actionIds when a page re-includes the cursor", async () => {
+    const page1 = new Map([
+      ["action-1", makeAction("action-1")],
+      ["action-2", makeAction("action-2")],
+    ]);
+    // Inclusive cursor mistakenly returns action-2 again.
+    const page2 = new Map([
+      ["action-2", makeAction("action-2")],
+      ["action-3", makeAction("action-3")],
+    ]);
+    const page3 = new Map();
+    const actions = vi
+      .fn()
+      .mockResolvedValueOnce(page1)
+      .mockResolvedValueOnce(page2)
+      .mockResolvedValueOnce(page3);
+
+    const pending = await listPendingActions({
+      sdk: { group: { actions } } as never,
+      contractId: "contract-1",
+      groupPosition: 1,
+      limit: 2,
+    });
+
+    expect(pending.map((entry) => entry.actionId)).toEqual([
+      "action-1",
+      "action-2",
+      "action-3",
+    ]);
+    // Third call is a short/empty page that terminates the loop.
+    expect(actions).toHaveBeenCalledTimes(3);
+  });
+
+  it("stops when a full page ends without a usable last action id", async () => {
+    const actions = vi.fn().mockResolvedValue(new Map());
+
+    const pending = await listPendingActions({
+      sdk: { group: { actions } } as never,
+      contractId: "contract-1",
+      groupPosition: 0,
+      limit: 2,
+    });
+
+    expect(pending).toEqual([]);
+    expect(actions).toHaveBeenCalledTimes(1);
   });
 });
 

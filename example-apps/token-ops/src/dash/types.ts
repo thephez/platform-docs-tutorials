@@ -215,7 +215,12 @@ export interface DashSdk {
       dataContractId: string;
       groupContractPosition: number;
       status: "ACTIVE" | "CLOSED";
-      startAt?: unknown;
+      /**
+       * Cursor for the next page. `included` defaults to false in the SDK —
+       * pass `false` explicitly when advancing from the last seen actionId so
+       * that action is not returned again.
+       */
+      startAt?: { actionId: string; included?: boolean };
       limit?: number;
     }): Promise<Map<string, GroupAction | undefined>>;
     actionSigners(args: {
