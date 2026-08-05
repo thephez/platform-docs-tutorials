@@ -376,6 +376,7 @@ function Shell() {
             onSearchSubmit={handleSearchSubmit}
             searchOutcome={search.outcome}
             onOpenListing={(l) => openDetail(l.documentId)}
+            onOpenDocument={openDetail}
             onBuy={requestBuy}
             onSeeAll={() => setView("browse")}
             canBuy={canOfferBuy}
@@ -406,6 +407,7 @@ function Shell() {
         {view === "detail" && (
           <NameDetailView
             record={detail.record}
+            network={network}
             ownership={detail.ownership}
             priceHistory={detail.priceHistory}
             loading={detail.loading}

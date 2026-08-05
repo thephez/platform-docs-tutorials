@@ -6,7 +6,9 @@
  * transfer/registration `#4a637d`.
  */
 import { activityKind, type HistoryEvent } from "../dash/listingTypes";
-import { formatBlock, formatDash, relativeTime, shortId } from "../lib/format";
+import type { Network } from "../dash/contracts";
+import { formatBlock, formatDash, relativeTime } from "../lib/format";
+import { ExplorerId } from "./ExplorerId";
 
 function dotColor(event: HistoryEvent): string {
   switch (activityKind(event)) {
@@ -33,22 +35,41 @@ function title(event: HistoryEvent): string {
   return "Transferred";
 }
 
-function detail(event: HistoryEvent): string {
+function Detail({ event, network }: { event: HistoryEvent; network: Network }) {
   const kind = activityKind(event);
   if (kind === "SALE") {
-    return `${shortId(event.sellerId)} → ${shortId(event.ownerId)} · purchase record`;
+    return (
+      <>
+        <ExplorerId network={network} kind="identity" id={event.sellerId} /> →{" "}
+        <ExplorerId network={network} kind="identity" id={event.ownerId} /> ·
+        purchase record
+      </>
+    );
   }
   if (kind === "TRANSFER") {
-    return `${shortId(event.ownerId)} → ${shortId(event.toIdentityId)} · listing cleared by transfer`;
+    return (
+      <>
+        <ExplorerId network={network} kind="identity" id={event.ownerId} /> →{" "}
+        <ExplorerId network={network} kind="identity" id={event.toIdentityId} />
+        · listing cleared by transfer
+      </>
+    );
   }
-  return `Price update by ${shortId(event.ownerId)}`;
+  return (
+    <>
+      Price update by{" "}
+      <ExplorerId network={network} kind="identity" id={event.ownerId} />
+    </>
+  );
 }
 
 export function Timeline({
   events,
+  network,
   showRegistrationNote = true,
 }: {
   events: HistoryEvent[];
+  network: Network;
   showRegistrationNote?: boolean;
 }) {
   if (events.length === 0 && !showRegistrationNote) {
@@ -77,7 +98,9 @@ export function Timeline({
                     ` · block ${formatBlock(event.createdAtBlockHeight)}`}
                 </span>
               </div>
-              <div className="timeline-entry__detail">{detail(event)}</div>
+              <div className="timeline-entry__detail">
+                <Detail event={event} network={network} />
+              </div>
             </div>
           </div>
         );

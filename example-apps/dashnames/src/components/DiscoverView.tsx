@@ -39,6 +39,7 @@ export function DiscoverView({
   onSearchSubmit,
   searchOutcome,
   onOpenListing,
+  onOpenDocument,
   onBuy,
   onSeeAll,
   canBuy,
@@ -60,6 +61,7 @@ export function DiscoverView({
   onSearchSubmit: () => void;
   searchOutcome: SearchOutcome;
   onOpenListing: (listing: Listing) => void;
+  onOpenDocument: (documentId: string) => void;
   onBuy: (listing: Listing) => void;
   onSeeAll: () => void;
   canBuy: boolean;
@@ -267,6 +269,7 @@ export function DiscoverView({
                 <NameCell
                   documentId={sale.documentId}
                   name={lookupName(sale.documentId)}
+                  onClick={() => onOpenDocument(sale.documentId)}
                 />
                 <span className="align-right">
                   {sale.price != null ? (

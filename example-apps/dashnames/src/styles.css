@@ -81,6 +81,12 @@ body {
   padding: 0;
 }
 
+html {
+  /* Keep the centered 1240px shell fixed when navigation changes whether the
+     page is tall enough to need a vertical scrollbar. */
+  scrollbar-gutter: stable;
+}
+
 body {
   background: var(--bg-page);
   color: var(--text-primary);
@@ -104,6 +110,12 @@ input {
 a {
   color: var(--brand-blue-bright);
   text-decoration: none;
+}
+
+.explorer-link:hover {
+  color: var(--brand-blue-bright);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* focus-visible is a 2px brand outline at 2px offset on every interactive
@@ -1064,6 +1076,20 @@ a {
   font-weight: 600;
   font-size: 13px;
   line-height: 1;
+}
+
+.data-table__name-link {
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+}
+
+.data-table__name-link:hover .dpns-name,
+.data-table__name-link:hover .dpns-name__suffix {
+  color: var(--brand-blue-bright);
 }
 
 .data-table__cell-mono {

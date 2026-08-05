@@ -80,6 +80,20 @@ test("browse filters are interactive", async ({ page }) => {
   await expect(three).toHaveClass(/filter-chip--active/);
 });
 
+test("the header stays horizontally fixed between views", async ({ page }) => {
+  await page.goto("/");
+
+  const wordmark = page.locator(".wordmark");
+  const initialX = (await wordmark.boundingBox())?.x;
+  expect(initialX).toBeDefined();
+
+  for (const view of ["Browse", "My names", "Activity", "Discover"]) {
+    await page.getByRole("button", { name: view, exact: true }).click();
+    await expect(wordmark).toBeVisible();
+    expect((await wordmark.boundingBox())?.x).toBe(initialX);
+  }
+});
+
 test("activity renders the table and event-type filters", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Activity", exact: true }).click();

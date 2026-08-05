@@ -13,15 +13,46 @@ import { DpnsName } from "./DpnsName";
 export function NameCell({
   documentId,
   name,
+  onClick,
 }: {
   documentId: string;
   name: NameLabel | null;
+  onClick?: () => void;
 }) {
   if (name) {
+    if (onClick) {
+      return (
+        <button
+          type="button"
+          className="data-table__cell-name data-table__name-link"
+          aria-label={`${name.label}.${name.parentDomainName}`}
+          onClick={onClick}
+        >
+          <DpnsName
+            label={name.label}
+            parentDomainName={name.parentDomainName}
+          />
+        </button>
+      );
+    }
+
     return (
       <span className="data-table__cell-name">
         <DpnsName label={name.label} parentDomainName={name.parentDomainName} />
       </span>
+    );
+  }
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className="data-table__cell-unresolved data-table__name-link mono"
+        title={`Document ${documentId}`}
+        onClick={onClick}
+      >
+        {shortId(documentId)}
+      </button>
     );
   }
 

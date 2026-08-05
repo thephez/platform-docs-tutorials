@@ -13,6 +13,7 @@
  */
 import { useState } from "react";
 import type { DomainRecord } from "../dash/dpnsQueries";
+import type { Network } from "../dash/contracts";
 import type { HistoryEvent } from "../dash/listingTypes";
 import {
   formatCredits,
@@ -23,9 +24,11 @@ import {
 import { DpnsName } from "./DpnsName";
 import { Timeline } from "./Timeline";
 import { SkeletonRows } from "./Skeleton";
+import { ExplorerId } from "./ExplorerId";
 
 export function NameDetailView({
   record,
+  network,
   ownership,
   priceHistory,
   loading,
@@ -37,6 +40,7 @@ export function NameDetailView({
   onManage,
 }: {
   record: DomainRecord | null;
+  network: Network;
   ownership: HistoryEvent[];
   priceHistory: HistoryEvent[];
   loading: boolean;
@@ -101,9 +105,14 @@ export function NameDetailView({
           </h1>
           <div className="detail__badges">
             {forSale && <span className="badge badge--sale">For sale</span>}
-            <span className="badge badge--meta">
+            <ExplorerId
+              network={network}
+              kind="document"
+              id={record.documentId}
+              className="badge badge--meta"
+            >
               doc {shortId(record.documentId)}
-            </span>
+            </ExplorerId>
             <span className="badge badge--meta">
               rev {String(record.revision)}
             </span>
@@ -112,18 +121,21 @@ export function NameDetailView({
           <div className="fact-strip">
             <div className="fact-cell">
               <span className="label-caps">Current owner</span>
-              <span className="fact-cell__value mono" title={record.ownerId}>
-                {shortId(record.ownerId)}
-              </span>
+              <ExplorerId
+                network={network}
+                kind="identity"
+                id={record.ownerId}
+                className="fact-cell__value mono"
+              />
             </div>
             <div className="fact-cell">
               <span className="label-caps">Resolves to</span>
-              <span
+              <ExplorerId
+                network={network}
+                kind="identity"
+                id={record.resolvesTo}
                 className="fact-cell__value mono"
-                title={record.resolvesTo ?? undefined}
-              >
-                {shortId(record.resolvesTo)}
-              </span>
+              />
             </div>
             <div className="fact-cell">
               <span className="label-caps">Last sale</span>
@@ -153,9 +165,13 @@ export function NameDetailView({
           </div>
 
           {tab === "ownership" ? (
-            <Timeline events={ownership} />
+            <Timeline events={ownership} network={network} />
           ) : (
-            <Timeline events={priceHistory} showRegistrationNote={false} />
+            <Timeline
+              events={priceHistory}
+              network={network}
+              showRegistrationNote={false}
+            />
           )}
 
           <div className="block-warning" style={{ marginTop: 16 }}>
@@ -226,8 +242,13 @@ export function NameDetailView({
               <span className="label-caps">Not for sale</span>
               <p className="modal__sub">
                 This name is registered and held by{" "}
-                <span className="mono">{shortId(record.ownerId)}</span>. It has
-                no asking price, so it cannot be bought here.
+                <ExplorerId
+                  network={network}
+                  kind="identity"
+                  id={record.ownerId}
+                  className="mono"
+                />
+                . It has no asking price, so it cannot be bought here.
               </p>
               {isOwner && (
                 <button

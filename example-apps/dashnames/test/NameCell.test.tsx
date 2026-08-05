@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { vi } from "vitest";
 import { NameCell } from "../src/components/NameCell";
 
 afterEach(cleanup);
@@ -22,6 +23,20 @@ describe("NameCell", () => {
     expect(screen.getByText(".dash")).toBeTruthy();
     // The raw document ID must not leak into the cell once resolved.
     expect(screen.queryByText(/77XB/)).toBeNull();
+  });
+
+  it("opens the document when rendered as a link", () => {
+    const onClick = vi.fn();
+    render(
+      <NameCell
+        documentId="77XBBQME5ffYcyu5mbHfCVatFgB6Du6kQquzbj6QXG9Y"
+        name={{ label: "alice", parentDomainName: "dash" }}
+        onClick={onClick}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "alice.dash" }));
+    expect(onClick).toHaveBeenCalledOnce();
   });
 
   it("falls back to a truncated document ID before the label resolves", () => {
