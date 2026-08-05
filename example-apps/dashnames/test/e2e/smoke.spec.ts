@@ -120,11 +120,11 @@ test("my names prompts for sign-in when browsing read-only", async ({
   await expect(page.getByText(/Sign in with a recovery phrase/i)).toBeVisible();
 });
 
-test("settings exposes the network switch and index controls", async ({
+test("settings switches networks and exposes index controls", async ({
   page,
 }) => {
   await page.goto("/");
-  await page.locator(".identity-chip").click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
 
   await expect(page.getByRole("heading", { name: "Network" })).toBeVisible();
   await expect(page.locator(".network-toggle .filter-chip")).toHaveCount(2);
@@ -132,6 +132,26 @@ test("settings exposes the network switch and index controls", async ({
   await expect(
     page.getByRole("button", { name: /Rebuild index from history/i }),
   ).toBeVisible();
+
+  await page.getByRole("button", { name: "mainnet", exact: true }).click();
+  await expect(page.getByLabel("Platform network")).toHaveValue("mainnet");
+  await expect(page.locator(".app-footer__chain")).toContainText("MAINNET");
+  await expect(
+    page.getByRole("button", { name: "Mainnet sign-in disabled" }),
+  ).toBeDisabled();
+
+  // The header control uses the same transition and can switch back without
+  // losing access to Settings.
+  await page.getByLabel("Platform network").selectOption("testnet");
+  await expect(
+    page.getByRole("button", { name: "testnet", exact: true }),
+  ).toHaveClass(/filter-chip--active/);
+  await expect(page.locator(".app-footer__chain")).toContainText("TESTNET");
+  await expect(
+    page
+      .getByRole("main")
+      .getByRole("button", { name: "Sign in", exact: true }),
+  ).toBeEnabled();
 });
 
 test("how-it-works explains the discovery algorithm", async ({ page }) => {

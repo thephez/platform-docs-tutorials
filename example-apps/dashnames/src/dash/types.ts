@@ -88,6 +88,14 @@ export interface DashSdk {
     }): Promise<unknown>;
   };
   identities: {
+    fetch(identityId: string): Promise<Identity | null | undefined>;
+    byPublicKeyHash(
+      publicKeyHash: Uint8Array,
+    ): Promise<Identity | null | undefined>;
+    byNonUniquePublicKeyHash?(
+      publicKeyHash: Uint8Array,
+      startAfter?: string,
+    ): Promise<Identity[]>;
     balance(identityId: string): Promise<bigint>;
   };
   dpns: {

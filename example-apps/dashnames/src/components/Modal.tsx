@@ -11,12 +11,16 @@ export function Modal({
   open,
   title,
   subtitle,
+  icon,
+  className,
   onClose,
   children,
 }: {
   open: boolean;
   title: string;
   subtitle?: ReactNode;
+  icon?: ReactNode;
+  className?: string;
   onClose: () => void;
   children: ReactNode;
 }) {
@@ -42,7 +46,7 @@ export function Modal({
       }}
     >
       <div
-        className="modal"
+        className={`modal${className ? ` ${className}` : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -50,9 +54,12 @@ export function Modal({
         ref={cardRef}
       >
         <div className="modal__head">
-          <div>
-            <h2 className="modal__title">{title}</h2>
-            {subtitle && <p className="modal__sub">{subtitle}</p>}
+          <div className="modal__heading">
+            {icon}
+            <div>
+              <h2 className="modal__title">{title}</h2>
+              {subtitle && <p className="modal__sub">{subtitle}</p>}
+            </div>
           </div>
           <button
             type="button"

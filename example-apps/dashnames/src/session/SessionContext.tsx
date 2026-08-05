@@ -25,7 +25,9 @@ import {
 } from "../dash/protocolVersion";
 import { loadSdkCore } from "../dash/sdkCore";
 import type { DashKeyManager, DashSdk } from "../dash/types";
+import { detectSecretShape } from "../lib/detectSecretShape";
 import { errorMessage } from "../lib/logger";
+import { keyManagerFromKey } from "./keyManagerFromKey";
 import type { SessionState, SessionValue } from "./types";
 
 function initialNetwork(): Network {
@@ -114,10 +116,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [network, connect]);
 
   const login = useCallback(
-    async (mnemonic: string) => {
+    async (
+      secret: string,
+      options: { identityIndex?: number; expectedIdentityId?: string } = {},
+    ) => {
       const sdk = state.sdk;
       const network = state.network;
       if (!sdk) throw new Error("Not connected yet.");
+      if (network !== "testnet") {
+        throw new Error(
+          "Sign-in is disabled on mainnet. Switch to testnet to use an identity.",
+        );
+      }
+      const trimmed = secret.trim();
+      if (!trimmed)
+        throw new Error("Recovery phrase or private key is required.");
       const id = ++authenticationId.current;
       const assertCurrent = () => {
         if (authenticationId.current !== id) {
@@ -125,15 +138,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         }
       };
 
-      const core = await loadSdkCore();
-      assertCurrent();
-      // The mnemonic enters the key manager here and is not retained anywhere
-      // else in the app.
-      const keyManager = (await core.IdentityKeyManager.create({
-        sdk,
-        mnemonic,
-        network,
-      })) as unknown as DashKeyManager;
+      const shape = detectSecretShape(trimmed);
+      let keyManager: DashKeyManager;
+      if (shape === "mnemonic") {
+        const core = await loadSdkCore();
+        assertCurrent();
+        keyManager = (await core.IdentityKeyManager.create({
+          sdk,
+          mnemonic: trimmed,
+          network,
+          identityIndex: options.identityIndex ?? 0,
+        })) as unknown as DashKeyManager;
+      } else {
+        const { loginWithPrivateKey } =
+          await import("../dash/loginWithPrivateKey");
+        assertCurrent();
+        const auth = await loginWithPrivateKey(
+          sdk,
+          trimmed,
+          options.expectedIdentityId,
+        );
+        keyManager = keyManagerFromKey(auth.identityId, auth);
+      }
       assertCurrent();
 
       const identityId = keyManager.identityId ?? null;
@@ -180,10 +206,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const setNetwork = useCallback((network: Network) => {
     authenticationId.current += 1;
+    connectionId.current += 1;
     saveNetwork(network);
-    setState((prev) =>
-      prev.network === network ? prev : { ...prev, network },
-    );
+    setState((prev) => {
+      if (prev.network === network) return prev;
+      return {
+        ...prev,
+        network,
+        status: "idle",
+        sdk: null,
+        keyManager: null,
+        identityId: null,
+        identityName: null,
+        balance: null,
+        protocol: UNKNOWN_PROTOCOL_STATUS,
+        error: null,
+      };
+    });
   }, []);
 
   const refreshBalance = useCallback(async () => {

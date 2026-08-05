@@ -25,7 +25,10 @@ npm ci
 npm run dev
 ```
 
-Browsing, search, and history need no sign-in. To list, buy, or transfer, open **Settings** (the identity chip, top right) and sign in with a testnet recovery phrase.
+Browsing, search, and history need no sign-in. To list, buy, or transfer, use
+the identity chip in the top-right corner and sign in with either a recovery
+phrase or a HIGH/CRITICAL authentication WIF. Clicking Buy while signed out
+opens the same login flow and resumes the purchase after authentication.
 
 Requires a funded testnet identity that already owns a name — this app trades existing names and does not register them. Create one with the repo's [`1-Identities-and-Names/name-register.mjs`](../../1-Identities-and-Names/name-register.mjs) first, then list it here.
 
@@ -46,6 +49,14 @@ npm run preview        # serve production build locally
 ## Network support
 
 The app defaults to testnet and shows an explanatory banner on any network below v13. The gate reads the network's **active platform protocol version** — `version.protocol.drive.current` from `sdk.system.status()`, which is a protocol version — and fails closed when it can't be determined.
+
+The network selector is always available in the header, including while signed
+out. Switching networks immediately signs out and clears the in-memory key
+manager, identity, and balance before reconnecting; credentials derived or
+resolved for one network are never carried into another network session.
+DashNames deliberately does not accept mnemonics or private keys on mainnet;
+mainnet remains read-only until the required protocol support and production
+safety review are in place.
 
 ## Contracts
 
@@ -104,6 +115,9 @@ Pull requests and pushes affecting this app or the shared SDK core run the dedic
 - **No fee estimates.** evo-sdk 4.1.0 exposes no fee-estimation or dry-run method, so any figure would be invented. Affordability is checked against the asking price; Platform rejects a genuinely insufficient balance.
 - **No transaction IDs.** The write methods resolve `void` and expose no state-transition hash. Failures show the real protocol error instead of a fabricated ID or spend claim.
 - **No registration.** That needs the preorder/commit flow plus contested-name voting — a substantial feature, not a button.
+- **Secrets are never persisted.** Recovery phrases and WIFs remain in
+  component/key-manager memory only and are cleared when login closes,
+  succeeds, is cancelled, or the network changes.
 - **Desktop-only.** No mobile layout was designed, and guessing at one produces work that gets thrown away.
 - **Client-side scanning doesn't scale forever.** Cold start replays all price history _and_ re-fetches every name that was ever listed. A browser pays that once per profile, but a production marketplace would use a server-side indexer.
 

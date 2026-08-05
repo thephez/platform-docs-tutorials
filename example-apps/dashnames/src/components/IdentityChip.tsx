@@ -12,11 +12,13 @@ export function IdentityChip({
   identityId,
   balance,
   onClick,
+  disabled = false,
 }: {
   name: string | null;
   identityId: string | null;
   balance: bigint | null;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   const signedIn = Boolean(identityId);
   const label = signedIn ? (name ?? shortId(identityId)) : "Sign in";
@@ -26,8 +28,13 @@ export function IdentityChip({
       type="button"
       className="identity-chip"
       onClick={onClick}
+      disabled={disabled}
       title={
-        signedIn ? (identityId ?? undefined) : "Sign in with a recovery phrase"
+        signedIn
+          ? (identityId ?? undefined)
+          : disabled
+            ? "Sign-in is disabled on mainnet. Switch to testnet to sign in."
+            : "Sign in with a recovery phrase or authentication WIF"
       }
     >
       <span className="identity-chip__name">{label}</span>

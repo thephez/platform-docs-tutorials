@@ -21,8 +21,11 @@ export interface SessionState {
 }
 
 export interface SessionValue extends SessionState {
-  /** Signs in. The mnemonic is a parameter only — it is never stored in state. */
-  login(mnemonic: string): Promise<void>;
+  /** Signs in. The secret is a parameter only — it is never stored in state. */
+  login(
+    secret: string,
+    options?: { identityIndex?: number; expectedIdentityId?: string },
+  ): Promise<void>;
   logout(): void;
   setNetwork(network: Network): void;
   refreshBalance(): Promise<void>;

@@ -6,6 +6,7 @@
  * balance live permanently here, and every signing step names the identity.
  */
 import type { FormEvent } from "react";
+import type { Network } from "../dash/contracts";
 import { IdentityChip } from "./IdentityChip";
 
 export type View =
@@ -47,6 +48,9 @@ export function AppHeader({
   identityName,
   identityId,
   balance,
+  network,
+  onNetworkChange,
+  onSettingsClick,
   onIdentityClick,
 }: {
   view: View;
@@ -58,6 +62,9 @@ export function AppHeader({
   identityName: string | null;
   identityId: string | null;
   balance: bigint | null;
+  network: Network;
+  onNetworkChange: (network: Network) => void;
+  onSettingsClick: () => void;
   onIdentityClick: () => void;
 }) {
   // A name-detail page is reached from the grid, so it keeps Browse lit.
@@ -109,11 +116,30 @@ export function AppHeader({
             />
           </form>
         )}
+        <select
+          className="header-network"
+          aria-label="Platform network"
+          value={network}
+          onChange={(event) => onNetworkChange(event.target.value as Network)}
+        >
+          <option value="testnet">TESTNET</option>
+          <option value="mainnet">MAINNET</option>
+        </select>
+        <button
+          type="button"
+          className="header-settings"
+          aria-label="Settings"
+          title="Network and index settings"
+          onClick={onSettingsClick}
+        >
+          Settings
+        </button>
         <IdentityChip
           name={identityName}
           identityId={identityId}
           balance={balance}
           onClick={onIdentityClick}
+          disabled={!identityId && network !== "testnet"}
         />
       </div>
     </header>

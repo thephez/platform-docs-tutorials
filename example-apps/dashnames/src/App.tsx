@@ -37,6 +37,7 @@ import { BuyModal } from "./components/BuyModal";
 import { DiscoverView } from "./components/DiscoverView";
 import { HowItWorks } from "./components/HowItWorks";
 import { ManageListingModal } from "./components/ManageListingModal";
+import { LoginModal } from "./components/LoginModal";
 import { MyNamesView } from "./components/MyNamesView";
 import { NameDetailView } from "./components/NameDetailView";
 import { ProtocolGateBanner } from "./components/ProtocolGateBanner";
@@ -65,6 +66,8 @@ function Shell() {
 
   // Modal state
   const [buyTarget, setBuyTarget] = useState<Listing | null>(null);
+  const [pendingBuy, setPendingBuy] = useState<Listing | null>(null);
+  const [loginOpen, setLoginOpen] = useState(false);
   const [manageTarget, setManageTarget] = useState<DomainRecord | null>(null);
   const [transferTarget, setTransferTarget] = useState<DomainRecord | null>(
     null,
@@ -101,8 +104,39 @@ function Shell() {
     return () => window.clearInterval(handle);
   }, []);
 
+  const handleNetworkChange = useCallback(
+    (next: typeof network) => {
+      setLoginOpen(false);
+      setPendingBuy(null);
+      session.setNetwork(next);
+    },
+    [session],
+  );
+
   const stale = isStale(lastSyncedAt, now);
   const canWrite = Boolean(keyManager && identityId && protocol.salesEnabled);
+  const canOfferBuy = protocol.salesEnabled;
+
+  const openLogin = useCallback(() => {
+    if (network !== "testnet") {
+      setView("settings");
+      return;
+    }
+    setLoginOpen(true);
+  }, [network]);
+
+  const requestBuy = useCallback(
+    (listing: Listing) => {
+      if (listing.ownerId === identityId) return;
+      if (!keyManager || !identityId) {
+        setPendingBuy(listing);
+        setLoginOpen(true);
+        return;
+      }
+      setBuyTarget(listing);
+    },
+    [identityId, keyManager],
+  );
 
   const sales = useMemo(
     () => activity.events.filter((e) => e.type === "purchase"),
@@ -311,13 +345,16 @@ function Shell() {
         identityName={identityName}
         identityId={identityId}
         balance={balance}
-        onIdentityClick={() => setView("settings")}
+        network={network}
+        onNetworkChange={handleNetworkChange}
+        onSettingsClick={() => setView("settings")}
+        onIdentityClick={() => (identityId ? setView("settings") : openLogin())}
       />
 
       <ProtocolGateBanner
         protocol={protocol}
         network={network}
-        onSwitchNetwork={session.setNetwork}
+        onSwitchNetwork={handleNetworkChange}
       />
 
       <main style={{ flex: 1 }}>
@@ -339,9 +376,9 @@ function Shell() {
             onSearchSubmit={handleSearchSubmit}
             searchOutcome={search.outcome}
             onOpenListing={(l) => openDetail(l.documentId)}
-            onBuy={setBuyTarget}
+            onBuy={requestBuy}
             onSeeAll={() => setView("browse")}
-            canBuy={canWrite}
+            canBuy={canOfferBuy}
             buyerIdentityId={identityId}
             loadingSales={activity.loading}
             onRefresh={refresh}
@@ -359,8 +396,8 @@ function Shell() {
             lastSyncedAt={lastSyncedAt}
             stale={stale}
             onOpenListing={(l) => openDetail(l.documentId)}
-            onBuy={setBuyTarget}
-            canBuy={canWrite}
+            onBuy={requestBuy}
+            canBuy={canOfferBuy}
             buyerIdentityId={identityId}
             onRefresh={refresh}
           />
@@ -374,12 +411,12 @@ function Shell() {
             loading={detail.loading}
             balance={balance}
             isOwner={detailIsOwner}
-            canWrite={canWrite}
+            canWrite={detailIsOwner ? canWrite : canOfferBuy}
             onBack={() => setView("discover")}
             onBuy={() => {
               if (!detail.record) return;
               const listing = toListing(detail.record, Date.now());
-              if (listing) setBuyTarget(listing);
+              if (listing) requestBuy(listing);
             }}
             onManage={() => detail.record && setManageTarget(detail.record)}
           />
@@ -414,13 +451,13 @@ function Shell() {
         {view === "settings" && (
           <SettingsView
             network={network}
-            onNetworkChange={session.setNetwork}
+            onNetworkChange={handleNetworkChange}
             identityId={identityId}
             identityName={identityName}
             balance={balance}
             protocol={protocol}
             status={status}
-            onLogin={session.login}
+            onOpenLogin={openLogin}
             onLogout={session.logout}
             onRebuildIndex={rebuild}
             indexSize={listings.length}
@@ -463,6 +500,19 @@ function Shell() {
         onViewName={(documentId) => {
           setBuyTarget(null);
           openDetail(documentId);
+        }}
+      />
+
+      <LoginModal
+        open={loginOpen}
+        onClose={() => {
+          setLoginOpen(false);
+          if (!identityId) setPendingBuy(null);
+        }}
+        onSuccess={() => {
+          setLoginOpen(false);
+          if (pendingBuy) setBuyTarget(pendingBuy);
+          setPendingBuy(null);
         }}
       />
 

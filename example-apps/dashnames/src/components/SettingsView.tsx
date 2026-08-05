@@ -4,7 +4,6 @@
  * The mnemonic is submitted straight to `login()` and cleared from local state
  * immediately — it is never stored, and never leaves the key manager closure.
  */
-import { useState, type FormEvent } from "react";
 import type { Network } from "../dash/contracts";
 import type { ProtocolStatus } from "../dash/protocolVersion";
 import { formatBlock, formatDash, shortId } from "../lib/format";
@@ -17,7 +16,7 @@ export function SettingsView({
   balance,
   protocol,
   status,
-  onLogin,
+  onOpenLogin,
   onLogout,
   onRebuildIndex,
   indexSize,
@@ -30,31 +29,12 @@ export function SettingsView({
   balance: bigint | null;
   protocol: ProtocolStatus;
   status: string;
-  onLogin: (mnemonic: string) => Promise<void>;
+  onOpenLogin: () => void;
   onLogout: () => void;
   onRebuildIndex: () => void;
   indexSize: number;
   persistFailed: boolean;
 }) {
-  const [mnemonic, setMnemonic] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      await onLogin(mnemonic.trim());
-      // Drop the secret from component state as soon as it has been handed off.
-      setMnemonic("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div className="prose">
       <h2>Network</h2>
@@ -103,34 +83,21 @@ export function SettingsView({
           </button>
         </>
       ) : (
-        <form className="form-panel" onSubmit={handleSubmit}>
-          <div className="field">
-            <label className="label-caps" htmlFor="mnemonic">
-              Recovery phrase
-            </label>
-            <textarea
-              id="mnemonic"
-              className="field__input field__textarea"
-              value={mnemonic}
-              onChange={(e) => setMnemonic(e.target.value)}
-              placeholder="twelve or twenty-four words"
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </div>
+        <div className="form-panel">
           <p className="status-line status-line--info">
-            Testnet only. The phrase is used to derive keys in memory and is
-            never stored or transmitted anywhere but Platform.
+            {network === "testnet"
+              ? "Sign in with a recovery phrase or a HIGH/CRITICAL authentication WIF. Your secret stays in browser memory and is never stored."
+              : "Sign-in is disabled on mainnet. Switch to testnet before entering a recovery phrase or private key."}
           </p>
-          {error && <p className="status-line status-line--error">{error}</p>}
           <button
-            type="submit"
+            type="button"
             className="btn btn--primary btn--sm"
-            disabled={busy || !mnemonic.trim()}
+            disabled={network !== "testnet"}
+            onClick={onOpenLogin}
           >
-            {busy ? "Signing in…" : "Sign in"}
+            {network === "testnet" ? "Sign in" : "Mainnet sign-in disabled"}
           </button>
-        </form>
+        </div>
       )}
 
       <h2>Listings index</h2>
