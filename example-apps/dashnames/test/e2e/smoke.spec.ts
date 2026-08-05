@@ -12,7 +12,9 @@ import { expect, test } from "@playwright/test";
  */
 test.describe.configure({ mode: "serial" });
 
-test("discover renders the hero, stat strip, and footer", async ({ page }) => {
+test("discover renders the hero, market summary, and footer", async ({
+  page,
+}) => {
   await page.goto("/");
 
   await expect(page.locator(".wordmark")).toHaveText("dashnames");
@@ -20,9 +22,9 @@ test("discover renders the hero, stat strip, and footer", async ({ page }) => {
     page.getByRole("heading", { name: /Your name, on Dash/i }),
   ).toBeVisible();
 
-  // Four stat cells: for sale, sold 30d, 30d volume, sync chip.
-  await expect(page.locator(".stat-cell")).toHaveCount(4);
-  await expect(page.locator(".stat-strip .label-caps").first()).toHaveText(
+  // The summary contains market figures only; sync state belongs to listings.
+  await expect(page.locator(".market-stat")).toHaveCount(3);
+  await expect(page.locator(".market-stats .label-caps").first()).toHaveText(
     /names for sale/i,
   );
 
@@ -32,7 +34,7 @@ test("discover renders the hero, stat strip, and footer", async ({ page }) => {
 
 test("the sync chip reports a real index state", async ({ page }) => {
   await page.goto("/");
-  const chip = page.locator(".stat-cell .sync-chip");
+  const chip = page.locator(".section__head .sync-chip").first();
   await expect(chip).toBeVisible();
   // Any of the designed states is acceptable; a blank chip is not.
   await expect(chip).toHaveText(/SYNCED|SYNCING|NOT SYNCED|LAST SYNCED|FAILED/);

@@ -1,7 +1,7 @@
 /**
- * Name tile. The Buy button appears ONLY on the hovered/focused
- * tile — deliberate, to keep the grid quiet. That reveal is CSS-driven
- * (`.name-tile:hover`), so it works on keyboard focus too.
+ * Name tile. Prices stay deliberately compact (DASH only), and the Buy action
+ * remains visible so scanning the grid never hides the marketplace's primary
+ * action or causes content to reflow on hover.
  */
 import type { Listing } from "../dash/listingTypes";
 import { relativeTime } from "../lib/format";
@@ -13,6 +13,7 @@ export function NameTile({
   meta,
   onOpen,
   onBuy,
+  onManage,
   canBuy,
   buyerIdentityId,
 }: {
@@ -21,12 +22,17 @@ export function NameTile({
   meta?: string;
   onOpen: (listing: Listing) => void;
   onBuy?: (listing: Listing) => void;
+  onManage?: (listing: Listing) => void;
   canBuy?: boolean;
   /** Suppresses self-purchase; owners manage their listing from My names. */
   buyerIdentityId?: string | null;
 }) {
   const metaText =
     meta ?? `${listing.label.length} char · ${relativeTime(listing.seenAt)}`;
+  const isOwner = Boolean(
+    buyerIdentityId && listing.ownerId === buyerIdentityId,
+  );
+  const action = isOwner ? onManage : canBuy ? onBuy : undefined;
 
   return (
     <div
@@ -49,17 +55,22 @@ export function NameTile({
       </div>
       <div className="name-tile__meta">{metaText}</div>
       <div className="name-tile__price-row">
-        <Price credits={listing.price} compact className="name-tile__price" />
-        {canBuy && listing.ownerId !== buyerIdentityId && onBuy && (
+        <Price
+          credits={listing.price}
+          showCredits={false}
+          minDecimals={0}
+          className="name-tile__price"
+        />
+        {action && (
           <button
             type="button"
-            className="name-tile__buy"
+            className="name-tile__action"
             onClick={(e) => {
               e.stopPropagation();
-              onBuy(listing);
+              action(listing);
             }}
           >
-            Buy
+            {isOwner ? "Manage" : "Buy"}
           </button>
         )}
       </div>

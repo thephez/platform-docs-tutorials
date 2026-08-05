@@ -367,7 +367,6 @@ function Shell() {
             syncProgress={progress}
             lastSyncedAt={lastSyncedAt}
             stale={stale}
-            protocol={protocol}
             searchInput={searchInput}
             onSearchInput={(value) => {
               setSearchInput(value);
@@ -378,6 +377,7 @@ function Shell() {
             onOpenListing={(l) => openDetail(l.documentId)}
             onOpenDocument={openDetail}
             onBuy={requestBuy}
+            onManage={setManageTarget}
             onSeeAll={() => setView("browse")}
             canBuy={canOfferBuy}
             buyerIdentityId={identityId}
@@ -398,6 +398,7 @@ function Shell() {
             stale={stale}
             onOpenListing={(l) => openDetail(l.documentId)}
             onBuy={requestBuy}
+            onManage={setManageTarget}
             canBuy={canOfferBuy}
             buyerIdentityId={identityId}
             onRefresh={refresh}

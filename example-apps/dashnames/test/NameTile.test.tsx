@@ -19,17 +19,21 @@ const listing: Listing = {
 };
 
 describe("NameTile", () => {
-  it("suppresses Buy for the listing owner", () => {
+  it("offers Manage instead of Buy to the listing owner", () => {
+    const onManage = vi.fn();
     render(
       <NameTile
         listing={listing}
         onOpen={vi.fn()}
         onBuy={vi.fn()}
+        onManage={onManage}
         canBuy
         buyerIdentityId="owner-1"
       />,
     );
     expect(screen.queryByRole("button", { name: "Buy" })).toBeNull();
+    screen.getByRole("button", { name: "Manage" }).click();
+    expect(onManage).toHaveBeenCalledWith(listing);
   });
 
   it("offers Buy to a different authenticated identity", () => {
@@ -43,5 +47,7 @@ describe("NameTile", () => {
       />,
     );
     expect(screen.getByRole("button", { name: "Buy" })).toBeTruthy();
+    expect(screen.getByText("1 DASH")).toBeTruthy();
+    expect(screen.queryByText(/credits/i)).toBeNull();
   });
 });

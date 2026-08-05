@@ -34,6 +34,7 @@ export function BrowseView({
   stale,
   onOpenListing,
   onBuy,
+  onManage,
   canBuy,
   buyerIdentityId,
   onRefresh,
@@ -48,6 +49,7 @@ export function BrowseView({
   stale: boolean;
   onOpenListing: (listing: Listing) => void;
   onBuy: (listing: Listing) => void;
+  onManage: (listing: Listing) => void;
   canBuy: boolean;
   buyerIdentityId: string | null;
   onRefresh: () => void;
@@ -118,6 +120,7 @@ export function BrowseView({
                   meta={`${listing.normalizedLabel.length} char`}
                   onOpen={onOpenListing}
                   onBuy={onBuy}
+                  onManage={onManage}
                   canBuy={canBuy}
                   buyerIdentityId={buyerIdentityId}
                 />

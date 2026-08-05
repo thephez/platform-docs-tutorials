@@ -13,7 +13,6 @@ import type { FormEvent } from "react";
 import type { Listing } from "../dash/listingTypes";
 import type { HistoryEvent } from "../dash/listingTypes";
 import type { SalesStats } from "../dash/historyAggregates";
-import type { ProtocolStatus } from "../dash/protocolVersion";
 import type { SyncPhase } from "../hooks/useListings";
 import type { SyncProgress } from "../dash/listingsIndex";
 import type { SearchOutcome } from "../hooks/useNameSearch";
@@ -33,7 +32,6 @@ export function DiscoverView({
   syncProgress,
   lastSyncedAt,
   stale,
-  protocol,
   searchInput,
   onSearchInput,
   onSearchSubmit,
@@ -41,6 +39,7 @@ export function DiscoverView({
   onOpenListing,
   onOpenDocument,
   onBuy,
+  onManage,
   onSeeAll,
   canBuy,
   buyerIdentityId,
@@ -55,7 +54,6 @@ export function DiscoverView({
   syncProgress: SyncProgress | null;
   lastSyncedAt: number | null;
   stale: boolean;
-  protocol: ProtocolStatus;
   searchInput: string;
   onSearchInput: (value: string) => void;
   onSearchSubmit: () => void;
@@ -63,6 +61,7 @@ export function DiscoverView({
   onOpenListing: (listing: Listing) => void;
   onOpenDocument: (documentId: string) => void;
   onBuy: (listing: Listing) => void;
+  onManage: (listing: Listing) => void;
   onSeeAll: () => void;
   canBuy: boolean;
   buyerIdentityId: string | null;
@@ -148,68 +147,70 @@ export function DiscoverView({
         </div>
       </section>
 
-      <section className="stat-strip">
-        <div className="stat-cell">
+      <section className="market-stats" aria-label="Market statistics">
+        <div className="market-stat">
           <span className="label-caps">Names for sale</span>
-          <span className="stat-cell__value">
+          <span className="market-stat__value">
             {syncing && listings.length === 0
               ? "—"
               : listings.length.toLocaleString("en-US")}
           </span>
         </div>
-        <div className="stat-cell">
+        <div className="market-stat">
           <span className="label-caps">Sold in 30 days</span>
           {salesStats.count == null ? (
-            <span className="stat-cell__empty">
+            <span className="market-stat__empty">
               {salesStats.unavailable
                 ? "Not available on this network"
                 : "No sales recorded yet"}
             </span>
           ) : (
-            <span className="stat-cell__value">
+            <span className="market-stat__value">
               {salesStats.count.toLocaleString("en-US")}
             </span>
           )}
         </div>
-        <div className="stat-cell">
+        <div className="market-stat">
           <span className="label-caps">30d volume</span>
           {salesStats.volumeCredits == null ? (
-            <span className="stat-cell__empty">
+            <span className="market-stat__empty">
               {salesStats.unavailable
                 ? "Not available on this network"
                 : "No sales recorded yet"}
             </span>
           ) : (
-            <span className="stat-cell__value">
+            <span className="market-stat__value">
               {formatDash(salesStats.volumeCredits, {
                 minDecimals: 0,
                 maxDecimals: 3,
               })}{" "}
-              <span className="stat-cell__unit">DASH</span>
+              <span className="market-stat__unit">DASH</span>
             </span>
           )}
-        </div>
-        <div className="stat-cell">
-          <SyncChip
-            phase={syncPhase}
-            progress={syncProgress}
-            lastSyncedAt={lastSyncedAt}
-            stale={stale}
-            blockHeight={protocol.blockHeight}
-            showBlock
-            onRefresh={onRefresh}
-          />
         </div>
       </section>
 
       <section className="section">
         <div className="section__head">
           <h2 className="section__title">Recently listed</h2>
-          {listings.length > 0 && (
-            <button type="button" className="section__link" onClick={onSeeAll}>
-              See all {listings.length.toLocaleString("en-US")} →
-            </button>
-          )}
+          <div className="section__actions">
+            <SyncChip
+              phase={syncPhase}
+              progress={syncProgress}
+              lastSyncedAt={lastSyncedAt}
+              stale={stale}
+              onRefresh={onRefresh}
+            />
+            {listings.length > 0 && (
+              <button
+                type="button"
+                className="section__link"
+                onClick={onSeeAll}
+              >
+                See all {listings.length.toLocaleString("en-US")} →
+              </button>
+            )}
+          </div>
         </div>
 
         {syncing && listings.length === 0 ? (
@@ -229,6 +230,7 @@ export function DiscoverView({
                 listing={listing}
                 onOpen={onOpenListing}
                 onBuy={onBuy}
+                onManage={onManage}
                 canBuy={canBuy}
                 buyerIdentityId={buyerIdentityId}
               />

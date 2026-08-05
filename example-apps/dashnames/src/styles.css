@@ -20,7 +20,7 @@
   --fill-muted-btn: rgba(255, 255, 255, 0.08);
 
   /* Borders */
-  --border-hairline: rgba(255, 255, 255, 0.05);
+  --border-hairline: rgba(255, 255, 255, 0.12);
   --border-subtle: rgba(255, 255, 255, 0.06);
   --border-default: rgba(255, 255, 255, 0.08);
   --border-card: rgba(255, 255, 255, 0.09);
@@ -55,14 +55,13 @@
   --text-mid: #c9d8e6;
   --text-secondary: #a8bccf;
   --text-body: #8ba0b6;
-  --text-nav-inactive: #7d93aa;
-  --text-muted: #5f7789;
-  --text-faint: #3f5a73;
-  --text-faintest: #31465c;
+  --text-nav-inactive: #a8bccf;
+  --text-muted: #93aabf;
   --timeline-dot-neutral: #4a637d;
 
   /* Type */
-  --font-ui: "Montserrat", system-ui, -apple-system, sans-serif;
+  --font-ui: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --font-display: "Montserrat", system-ui, -apple-system, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
 
   /* Layout */
@@ -91,7 +90,7 @@ body {
   background: var(--bg-page);
   color: var(--text-primary);
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: 15px;
   -webkit-font-smoothing: antialiased;
   /* Desktop-only design: keep the 1240px container from forcing the page to
      scroll horizontally in a narrow window without inventing a mobile layout. */
@@ -131,6 +130,10 @@ a {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+}
+
+h1 {
+  font-family: var(--font-display);
 }
 
 .mono {
@@ -195,6 +198,7 @@ a {
 }
 
 .wordmark {
+  font-family: var(--font-display);
   font-weight: 800;
   font-size: 17px;
   line-height: 1;
@@ -274,7 +278,7 @@ a {
   background-color: var(--fill-chip);
   color: var(--text-secondary);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   cursor: pointer;
@@ -292,7 +296,7 @@ a {
   padding: 0 12px;
   background: transparent;
   color: var(--text-muted);
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -325,7 +329,7 @@ a {
 
 .identity-chip__name {
   font-weight: 600;
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1;
   color: var(--text-high);
 }
@@ -333,7 +337,7 @@ a {
 .identity-chip__balance {
   font-family: var(--font-mono);
   font-weight: 600;
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1;
   color: var(--brand-blue-bright);
 }
@@ -359,7 +363,7 @@ a {
 
 .app-footer__note {
   font-weight: 400;
-  font-size: 10.5px;
+  font-size: 12px;
   line-height: 1.6;
   color: var(--text-muted);
   max-width: 640px;
@@ -368,8 +372,8 @@ a {
 .app-footer__chain {
   font-family: var(--font-mono);
   font-weight: 600;
-  font-size: 10.5px;
-  color: var(--text-faint);
+  font-size: 12px;
+  color: var(--text-muted);
   white-space: nowrap;
 }
 
@@ -384,7 +388,7 @@ a {
   padding: 5px 9px;
   font-family: var(--font-mono);
   font-weight: 600;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--brand-blue-bright);
   white-space: nowrap;
 }
@@ -431,10 +435,10 @@ a {
 
 .label-caps {
   font-weight: 600;
-  font-size: 9.5px;
+  font-size: 13px;
   line-height: 1;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--text-muted);
 }
 
@@ -444,7 +448,7 @@ a {
   border-radius: 4px;
   padding: 4px 8px;
   font-weight: 700;
-  font-size: 9.5px;
+  font-size: 12px;
   line-height: 1;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -480,7 +484,7 @@ a {
   color: var(--text-body);
   font-family: var(--font-mono);
   font-weight: 500;
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0;
   text-transform: none;
   border-radius: 5px;
@@ -565,14 +569,14 @@ a {
   height: 31px;
   padding: 0 13px;
   border-radius: 7px;
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 /* Info / warning / error blocks */
 .notice {
   border-radius: 7px;
   padding: 8px 11px;
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
   display: flex;
   align-items: center;
@@ -591,7 +595,7 @@ a {
   border-radius: 8px;
   padding: 11px 13px;
   font-weight: 400;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.55;
   color: var(--warning-amber-text);
 }
@@ -606,7 +610,7 @@ a {
   border-radius: 8px;
   padding: 11px 13px;
   font-weight: 400;
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.6;
   color: var(--danger-red-light);
 }
@@ -620,7 +624,7 @@ a {
   border-radius: 8px;
   padding: 10px 12px;
   font-weight: 400;
-  font-size: 10.5px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--text-body);
 }
@@ -631,7 +635,7 @@ a {
   padding: 11px 44px;
   background: var(--warning-tint);
   border-bottom: 1px solid var(--warning-tint-border);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.55;
   color: var(--warning-amber-text);
 }
@@ -793,7 +797,7 @@ a {
 
 .hero-search__badge {
   font-weight: 700;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -847,7 +851,7 @@ a {
 
 .hero-popular__label {
   font-weight: 500;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
@@ -857,7 +861,7 @@ a {
   border-radius: 13px;
   padding: 5px 10px;
   font-weight: 600;
-  font-size: 10.5px;
+  font-size: 12px;
   color: var(--text-secondary);
 }
 
@@ -865,46 +869,40 @@ a {
   color: var(--text-high);
 }
 
-/* Stat strip */
-.stat-strip {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  background: var(--bg-chrome);
+/* Quiet market summary beneath the hero. Operational index state lives beside
+   the listing section it describes rather than masquerading as a fourth stat. */
+.market-stats {
+  display: flex;
+  align-items: center;
+  gap: 34px;
+  padding: 14px 44px;
   border-bottom: 1px solid var(--border-default);
 }
 
-.stat-cell {
-  padding: 15px 26px;
-  border-right: 1px solid var(--border-subtle);
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
+.market-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 9px;
   min-width: 0;
 }
 
-.stat-cell:last-child {
-  border-right: 0;
-  justify-content: center;
-  align-items: flex-start;
-}
-
-.stat-cell__value {
+.market-stat__value {
   font-weight: 700;
-  font-size: 19px;
+  font-size: 14px;
   line-height: 1;
-  color: var(--text-primary);
+  color: var(--text-high);
 }
 
-.stat-cell__unit {
-  font-size: 11px;
+.market-stat__unit {
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-body);
 }
 
-.stat-cell__empty {
+.market-stat__empty {
   font-weight: 500;
-  font-size: 11.5px;
-  color: var(--text-muted);
+  font-size: 12px;
+  color: var(--text-body);
   line-height: 1.3;
 }
 
@@ -928,9 +926,15 @@ a {
   margin: 0;
 }
 
+.section__actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
 .section__link {
   font-weight: 600;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--brand-blue-bright);
   background: none;
   border: 0;
@@ -939,8 +943,8 @@ a {
 
 .section__note {
   font-weight: 400;
-  font-size: 10.5px;
-  color: var(--text-faint);
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 /* Name tiles */
@@ -978,7 +982,7 @@ a {
 
 .name-tile__meta {
   font-weight: 400;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-muted);
   margin: 6px 0 11px;
 }
@@ -995,27 +999,22 @@ a {
   line-height: 1.2;
 }
 
-.name-tile__price .price__credits {
-  font-size: 9px;
-}
-
-.name-tile__buy {
-  height: 26px;
-  padding: 0 11px;
+.name-tile__action {
+  height: 32px;
+  padding: 0 13px;
   border-radius: 6px;
-  background: var(--brand-dash-blue);
-  color: #fff;
-  border: 0;
+  background: transparent;
+  color: var(--brand-blue-bright);
+  border: 1px solid var(--brand-dash-blue);
   font-weight: 700;
-  font-size: 11px;
-  opacity: 0;
-  transition: opacity 120ms ease;
-  pointer-events: none;
+  font-size: 12px;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
   flex: none;
 }
 
-/* The Buy button only appears on the hovered/focused tile — deliberate, to
-   keep the grid quiet. */
+/* Hover/focus raises the tile and fills its already-visible primary action. */
 .name-tile:hover,
 .name-tile:focus-visible,
 .name-tile--focused {
@@ -1024,17 +1023,13 @@ a {
   box-shadow: 0 0 0 3px rgba(0, 141, 228, 0.12);
 }
 
-.name-tile:hover .name-tile__meta,
-.name-tile:focus-visible .name-tile__meta,
-.name-tile--focused .name-tile__meta {
-  margin-bottom: 9px;
-}
-
-.name-tile:hover .name-tile__buy,
-.name-tile:focus-visible .name-tile__buy,
-.name-tile--focused .name-tile__buy {
-  opacity: 1;
-  pointer-events: auto;
+.name-tile:hover .name-tile__action,
+.name-tile:focus-visible .name-tile__action,
+.name-tile__action:hover,
+.name-tile__action:focus-visible,
+.name-tile--focused .name-tile__action {
+  background: var(--brand-dash-blue);
+  color: #fff;
 }
 
 /* Tables */
@@ -1094,20 +1089,20 @@ a {
 
 .data-table__cell-mono {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 12px;
   color: var(--text-body);
 }
 
 /* A document ID standing in for a name that hasn't resolved yet (or no longer
    exists). Deliberately dimmer than a real name so it doesn't read as one. */
 .data-table__cell-unresolved {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
 .data-table__cell-meta {
   font-weight: 400;
-  font-size: 10.5px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
@@ -1119,7 +1114,7 @@ a {
 .empty-state {
   padding: 26px 18px;
   text-align: center;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
@@ -1145,7 +1140,7 @@ a {
 .filter-group__label {
   margin-bottom: 10px;
   letter-spacing: 0.08em;
-  font-size: 10.5px;
+  font-size: 12px;
 }
 
 .filter-options {
@@ -1219,7 +1214,7 @@ a {
 
 .results-toolbar__summary {
   font-weight: 400;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   margin-left: 8px;
 }
@@ -1237,7 +1232,7 @@ a {
   background: transparent;
   color: var(--text-secondary);
   font-weight: 600;
-  font-size: 11.5px;
+  font-size: 12px;
   padding: 0 8px;
 }
 
@@ -1248,8 +1243,8 @@ a {
 .browse__footnote {
   padding: 0 24px 20px;
   font-weight: 400;
-  font-size: 10.5px;
-  color: var(--text-faint);
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 /* --------------------------------------------------------------- name detail */
@@ -1257,7 +1252,7 @@ a {
 .breadcrumb {
   padding: 14px 32px;
   font-weight: 500;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   display: flex;
   align-items: center;
@@ -1265,7 +1260,7 @@ a {
 }
 
 .breadcrumb__sep {
-  color: var(--text-faintest);
+  color: var(--text-muted);
 }
 
 .breadcrumb__current {
@@ -1331,7 +1326,7 @@ a {
 }
 
 .fact-cell__value {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-high);
   overflow-wrap: anywhere;
 }
@@ -1408,14 +1403,14 @@ a {
 .timeline-entry__when {
   font-family: var(--font-mono);
   font-weight: 500;
-  font-size: 10.5px;
+  font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;
 }
 
 .timeline-entry__detail {
   font-weight: 400;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-body);
   margin-top: 3px;
   overflow-wrap: anywhere;
@@ -1438,7 +1433,7 @@ a {
 
 .buy-panel__credits {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 12px;
   color: var(--text-muted);
   margin: 7px 0 16px;
 }
@@ -1449,7 +1444,7 @@ a {
   justify-content: space-between;
   gap: 12px;
   font-weight: 500;
-  font-size: 11.5px;
+  font-size: 12px;
   padding: 7px 0;
 }
 
@@ -1497,7 +1492,7 @@ a {
 
 .page-head__sub {
   font-weight: 400;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-muted);
   margin: 9px 0 0;
 }
@@ -1542,7 +1537,7 @@ a {
 
 .portfolio-row__meta {
   font-weight: 400;
-  font-size: 10.5px;
+  font-size: 12px;
   color: var(--text-muted);
   margin-top: 7px;
 }
@@ -1563,7 +1558,7 @@ a {
 
 .portfolio-row__state {
   font-weight: 600;
-  font-size: 9.5px;
+  font-size: 12px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--success-green);
@@ -1588,7 +1583,7 @@ a {
   border: 1px solid var(--border-control);
   color: var(--text-secondary);
   font-weight: 600;
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .activity-filter--active {
@@ -1604,8 +1599,8 @@ a {
 .table-footnote {
   padding: 12px 32px 30px;
   font-weight: 400;
-  font-size: 10.5px;
-  color: var(--text-faint);
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .amount-dash {
@@ -1666,7 +1661,7 @@ a {
 
 .modal__sub {
   font-weight: 400;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   margin: 7px 0 0;
   line-height: 1.5;
@@ -1707,13 +1702,13 @@ a {
   justify-content: space-between;
   align-items: center;
   color: var(--text-muted);
-  font-size: 10.5px;
+  font-size: 12px;
 }
 
 .login-network-row strong {
   color: var(--brand-blue-bright);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
@@ -1725,14 +1720,14 @@ a {
 
 .login-label {
   color: var(--text-high);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 700;
 }
 
 .login-memory-hint {
   margin: 0;
   color: var(--text-muted);
-  font-size: 10.5px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -1742,7 +1737,7 @@ a {
   border-radius: 8px;
   background: var(--fill-subtle);
   color: var(--text-muted);
-  font-size: 10.5px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
@@ -1806,7 +1801,7 @@ a {
 
 .cost-credits {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-muted);
   text-align: right;
 }
@@ -1819,7 +1814,7 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-body);
 }
 
@@ -1831,7 +1826,7 @@ a {
 .signing-note {
   text-align: center;
   font-weight: 400;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-muted);
   line-height: 1.5;
 }
@@ -1869,7 +1864,7 @@ a {
   border-radius: 7px;
   padding: 11px 13px;
   font-weight: 400;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.7;
   color: var(--text-body);
   text-align: left;
@@ -1926,7 +1921,7 @@ a {
 
 .input-help {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-muted);
   line-height: 1.5;
 }
@@ -1969,7 +1964,7 @@ a {
 
 .action-row__hint {
   font-weight: 400;
-  font-size: 10.5px;
+  font-size: 12px;
   color: var(--text-muted);
   margin-top: 4px;
 }
@@ -1979,7 +1974,7 @@ a {
   align-items: flex-start;
   gap: 9px;
   font-weight: 400;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--text-body);
   background: none;
@@ -1998,7 +1993,7 @@ a {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: 12px;
   color: #fff;
   line-height: 1;
 }
@@ -2036,7 +2031,7 @@ a {
 
 .prose code {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-high);
   background: var(--fill-chip);
   padding: 1px 5px;
@@ -2085,7 +2080,7 @@ a {
 }
 
 .status-line {
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
