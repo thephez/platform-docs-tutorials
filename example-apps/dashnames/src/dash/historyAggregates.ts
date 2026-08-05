@@ -30,6 +30,7 @@
  * SDK methods: sdk.documents.count / sdk.documents.sum
  */
 import { HISTORY_CONTRACT_ID } from "./contracts";
+import { isMissingContractError } from "./historyQueries";
 import { errorMessage } from "../lib/logger";
 import type { DashSdk, OrderByClause } from "./types";
 
@@ -79,6 +80,8 @@ export function last30Days(nowMs: number): SalesWindow {
 export interface SalesStats {
   count: bigint | null;
   volumeCredits: bigint | null;
+  /** True when the History contract doesn't exist on this network yet (v12). */
+  unavailable?: boolean;
 }
 
 function windowWhere(dataContractId: string, window: SalesWindow): unknown[][] {
@@ -114,6 +117,9 @@ export async function fetchSalesStats({
   try {
     count = firstMapValue(await sdk.documents.count(args)) ?? null;
   } catch (err) {
+    if (isMissingContractError(err)) {
+      return { count: null, volumeCredits: null, unavailable: true };
+    }
     if (!isEmptyAggregateError(err)) throw err;
     // No purchase records in range — nothing to compute.
     return { count: null, volumeCredits: null };
@@ -126,6 +132,9 @@ export async function fetchSalesStats({
     volumeCredits =
       firstMapValue(await sdk.documents.sum(args, "price")) ?? null;
   } catch (err) {
+    if (isMissingContractError(err)) {
+      return { count: null, volumeCredits: null, unavailable: true };
+    }
     if (!isEmptyAggregateError(err)) throw err;
     volumeCredits = null;
   }

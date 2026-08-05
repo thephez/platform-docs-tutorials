@@ -12,6 +12,7 @@ import {
   fetchDomainByLabel,
   normalizeLabelInput,
   searchDomainsByPrefix,
+  toNormalizedLabel,
   type DomainRecord,
 } from "../dash/dpnsQueries";
 import type { DashSdk } from "../dash/types";
@@ -42,7 +43,9 @@ export function useNameSearch(sdk: DashSdk | null) {
       try {
         const record = await fetchDomainByLabel({
           sdk,
-          normalizedLabel: label,
+          // DPNS stores the homograph-folded label, so `latte` must be looked up
+          // as `1atte`. The user still sees what they typed.
+          normalizedLabel: await toNormalizedLabel(sdk, label),
         });
         if (requestId.current !== id) return { kind: "idle" };
         const next: SearchOutcome = record
@@ -72,7 +75,11 @@ export function useNameSearch(sdk: DashSdk | null) {
       }
       const id = ++requestId.current;
       try {
-        const records = await searchDomainsByPrefix({ sdk, prefix, limit: 8 });
+        const records = await searchDomainsByPrefix({
+          sdk,
+          prefix: await toNormalizedLabel(sdk, prefix),
+          limit: 8,
+        });
         if (requestId.current !== id) return;
         setSuggestions(records);
       } catch {

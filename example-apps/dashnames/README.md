@@ -49,12 +49,14 @@ The app defaults to testnet and shows an explanatory banner on any network below
 
 ## Contracts
 
-This app registers no contract of its own — it reads and writes two system contracts, both fixed constants in [`src/dash/contracts.ts`](./src/dash/contracts.ts) and identical on testnet and mainnet:
+This app registers no contract of its own — it reads and writes two system contracts, both fixed constants in [`src/dash/contracts.ts`](./src/dash/contracts.ts):
 
 | Contract | ID | Role |
 | - | - | - |
 | DPNS | `GWRSAVFMjXx8HpQFaNJMqBV7MBgMK4br5UESsB4S31Ec` | The `domain` documents that are the tradeable asset |
 | Document History | `6voHRaoiPcfmMhbqCA9dixH98xcgPQ9UEcuaXjpVu3LD` | The `priceUpdate` / `purchase` / `transfer` streams the listings index is built from |
+
+DPNS exists on both networks. Document History is created by the v13 upgrade, so it is **testnet-only today** — the ID is deterministic and becomes valid on mainnet once v13 activates there.
 
 There is no contract-registration flow and no contract-ID setting — unlike the sibling example apps, which each register their own contract.
 
@@ -98,6 +100,7 @@ Pull requests and pushes affecting this app or the shared SDK core run the dedic
 
 ## Limitations
 
+- **Mainnet is read-only, and has no history.** Mainnet runs protocol v12, so every write is gated off. The Document History contract is created by the v13 upgrade and does not exist there yet, so listings, activity, and sales stats are unavailable too — name search, lookup, and portfolio still work. All of it lights up on its own once mainnet activates v13; no code change needed.
 - **No fee estimates.** evo-sdk 4.1.0 exposes no fee-estimation or dry-run method, so any figure would be invented. Affordability is checked against the asking price; Platform rejects a genuinely insufficient balance.
 - **No transaction IDs.** The write methods resolve `void` and expose no state-transition hash. Failures show the real protocol error instead of a fabricated ID or spend claim.
 - **No registration.** That needs the preorder/commit flow plus contested-name voting — a substantial feature, not a button.

@@ -29,7 +29,7 @@ export function ProtocolGateBanner({
           : "Protocol version unavailable."}
       </strong>{" "}
       {known
-        ? `Buying, selling, and transferring DPNS names needs v${SALES_MIN_PROTOCOL_VERSION}, so every write is disabled here. Browsing, search, and history all still work.`
+        ? `Buying, selling, and transferring DPNS names needs v${SALES_MIN_PROTOCOL_VERSION}, so every write is disabled here. The Document History contract is created by that same upgrade, so listings, sales stats, and activity are unavailable too — name search and lookup still work.`
         : "The active protocol version could not be read, so writes stay disabled until it can be confirmed."}
       {network === "mainnet" && onSwitchNetwork && (
         <>

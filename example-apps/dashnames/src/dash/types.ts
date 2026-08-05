@@ -93,5 +93,7 @@ export interface DashSdk {
   dpns: {
     username(identityId: string): Promise<string | null | undefined>;
     resolveName(name: string): Promise<string | null | undefined>;
+    /** DPNS's homograph fold (`l`/`i` -> `1`, `o` -> `0`). Async: WASM init. */
+    convertToHomographSafe(input: string): Promise<string>;
   };
 }

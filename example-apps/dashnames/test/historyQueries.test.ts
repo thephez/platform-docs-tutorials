@@ -1,6 +1,86 @@
-import { describe, expect, it } from "vitest";
-import { fetchRecentEvents } from "../src/dash/historyQueries";
+import { describe, expect, it, vi } from "vitest";
+import {
+  fetchDocumentHistory,
+  fetchRecentEvents,
+  fetchStreamPage,
+  isMissingContractError,
+} from "../src/dash/historyQueries";
 import type { DashSdk } from "../src/dash/types";
+
+/**
+ * The real error, captured live against mainnet on 2026-08-05. The History
+ * contract is created by the v13 upgrade, which mainnet (v12) hasn't activated.
+ */
+const MISSING_CONTRACT_ERROR = "Data contract not found";
+
+/** An SDK whose every history query fails the way mainnet's does today. */
+function makeMissingContractSdk() {
+  const query = vi.fn(async () => {
+    throw new Error(MISSING_CONTRACT_ERROR);
+  });
+  return { sdk: { documents: { query } } as unknown as DashSdk, query };
+}
+
+describe("isMissingContractError", () => {
+  it("matches the not-found failure", () => {
+    expect(isMissingContractError(new Error(MISSING_CONTRACT_ERROR))).toBe(
+      true,
+    );
+  });
+
+  it("does NOT match unrelated failures — those are real bugs and must surface", () => {
+    expect(isMissingContractError(new Error("connection reset by peer"))).toBe(
+      false,
+    );
+    expect(isMissingContractError(new Error("document not found"))).toBe(false);
+    expect(
+      isMissingContractError(new Error("where clause on non indexed property")),
+    ).toBe(false);
+  });
+});
+
+describe("history reads when the contract does not exist yet", () => {
+  it("fetchStreamPage returns empty instead of throwing", async () => {
+    const { sdk } = makeMissingContractSdk();
+    await expect(
+      fetchStreamPage({ sdk, type: "priceUpdate", dataContractId: "dpns" }),
+    ).resolves.toEqual([]);
+  });
+
+  it("fetchDocumentHistory returns empty instead of throwing", async () => {
+    const { sdk } = makeMissingContractSdk();
+    await expect(
+      fetchDocumentHistory({
+        sdk,
+        type: "purchase",
+        dataContractId: "dpns",
+        documentId: "doc-1",
+      }),
+    ).resolves.toEqual([]);
+  });
+
+  it("fetchRecentEvents returns empty without looping", async () => {
+    const { sdk, query } = makeMissingContractSdk();
+    await expect(
+      fetchRecentEvents({ sdk, type: "transfer", dataContractId: "dpns" }),
+    ).resolves.toEqual([]);
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it("still propagates a genuine query failure", async () => {
+    const sdk = {
+      documents: {
+        query: async () => {
+          throw new Error("connection reset by peer");
+        },
+      },
+    } as unknown as DashSdk;
+
+    await expect(
+      fetchStreamPage({ sdk, type: "priceUpdate", dataContractId: "dpns" }),
+    ).rejects.toThrow("connection reset");
+  });
+});
 
 describe("fetchRecentEvents", () => {
   it("pages the ascending stream before selecting the newest records", async () => {

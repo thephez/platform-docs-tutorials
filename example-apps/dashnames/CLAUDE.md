@@ -8,7 +8,7 @@ React + TypeScript + Vite app for buying and selling DPNS usernames (`alice.dash
 
 The app's reason to exist is the **listings index**: `$price` is not an indexed property on `domain`, so Platform cannot answer "what is for sale" — a `where` clause on it is rejected outright. The app reconstructs that answer client-side from the Document History contract's price-update stream, then confirms every candidate against its current document. See [The listings index](#the-listings-index).
 
-The shell is a five-view app (`discover` / `browse` / `my-names` / `activity` / `settings`, plus a `how` guide). Browsing, search, and history need no sign-in; listing, buying, and transferring require a mnemonic and a network at protocol v13 or above. Trading works on testnet (v13) and is disabled on mainnet (v12).
+The shell is a five-view app (`discover` / `browse` / `my-names` / `activity` / `settings`, plus a `how` guide). Browsing, search, and history need no sign-in; listing, buying, and transferring require a mnemonic and a network at protocol v13 or above. Trading works on testnet (v13) and is disabled on mainnet (v12). On mainnet the Document History contract does not exist yet either, so name search and lookup work but listings, activity, and sales stats are unavailable — see [rule 6b](#6b-the-history-contract-may-not-exist-on-the-network-at-all).
 
 ## Commands
 
@@ -48,7 +48,7 @@ This app registers **no** contract of its own — it reads and writes two system
 | Constant | Value | Role |
 | - | - | - |
 | `DPNS_CONTRACT_ID` | `GWRSAVFMjXx8HpQFaNJMqBV7MBgMK4br5UESsB4S31Ec` | The `domain` documents that are the tradeable asset. Same on both networks. |
-| `HISTORY_CONTRACT_ID` | `6voHRaoiPcfmMhbqCA9dixH98xcgPQ9UEcuaXjpVu3LD` | Document History system contract that DPNS opted into at v13. Source of the `priceUpdate` / `purchase` / `transfer` streams. Same on both networks. |
+| `HISTORY_CONTRACT_ID` | `6voHRaoiPcfmMhbqCA9dixH98xcgPQ9UEcuaXjpVu3LD` | Document History system contract that DPNS opted into at v13. Source of the `priceUpdate` / `purchase` / `transfer` streams. **Testnet only today** — created by the v13 upgrade, so it does not exist on mainnet (v12). Same deterministic ID once mainnet activates v13. |
 | `MAX_IN_CLAUSE` | `100` | Hard cap on an `$id IN` batch — 101 is rejected. See [rule 8](#8-in-is-capped-at-exactly-100). |
 | `SALES_MIN_PROTOCOL_VERSION` | `13` | The write gate. See [rule 9](#9-gate-on-the-active-protocol-version-and-know-which-field-that-is). |
 
@@ -80,6 +80,7 @@ The discovery algorithm in [listingsIndex.ts](src/dash/listingsIndex.ts) is what
 - **Buy** ([purchaseName.ts](src/dash/purchaseName.ts)): `sdk.documents.purchase({ document, buyerId, price: bigint, identityKey, signer })`.
 - **Transfer** ([transferName.ts](src/dash/transferName.ts)): `sdk.documents.transfer({ document, recipientId, identityKey, signer })`.
 - **DPNS name lookup**: `sdk.dpns.username(identityId)` ([useDpnsNames.ts](src/hooks/useDpnsNames.ts), `SessionContext`) and `sdk.dpns.resolveName(fullName)` ([resolveRecipient.ts](src/dash/resolveRecipient.ts)) for transfer recipients.
+- **Label normalization**: `sdk.dpns.convertToHomographSafe(label)` via `toNormalizedLabel` ([dpnsQueries.ts](src/dash/dpnsQueries.ts)) — required before any `normalizedLabel` query. See [rule 6c](#6c-query-normalizedlabel-with-the-homograph-fold-not-the-raw-label).
 - **Balance**: `sdk.identities.balance(identityId)` → `bigint`, called from `SessionContext`.
 
 All three writes flow through [withAuthedDocument.ts](src/dash/withAuthedDocument.ts), which fetches the document, bumps its revision, resolves the auth signer, and enforces the `salesEnabled` gate before any SDK call. See [The extractable seam](#the-extractable-seam).
@@ -128,6 +129,24 @@ Watermarks advance **only after** the affected documents are fetched, and persis
 **The `where` clause must exactly match the index properties.** `byContract` is `[dataContractId, $createdAt]`, so filtering `dataContractId` alone is rejected ("prove count requires a `countable: true` index whose properties exactly match the where clause fields"). Every aggregate carries a `$createdAt between` bound; an all-time figure uses a wide range rather than omitting it.
 
 **An aggregate over an empty set errors instead of returning zero.** With 0 `purchase` records, `count`/`sum` fail with a grovedb proof error (`missing lower layer` / `0 lower-layer entries`), not `0n`. Mapped to the empty state as a _rendering_ branch — there is no client-side arithmetic fallback. The match is deliberately narrow (proof shapes only) so a real query bug still surfaces. Probably a platform/grovedb bug worth reporting upstream: a proof over an empty set should be provably empty, not unprovable.
+
+### 6b. The History contract may not exist on the network at all
+
+Distinct from an empty result: on a pre-v13 network the contract itself is absent and **every** history query fails with `NotFound` / "Data contract not found". Mainnet is v12 today, so that is its normal state.
+
+History reads therefore degrade to empty rather than throwing (`isMissingContractError` in [historyQueries.ts](src/dash/historyQueries.ts)), and `fetchSalesStats` sets `unavailable: true` so the UI can distinguish "not on this network" from "no sales yet" — the two must never render identically.
+
+The rule this protects: **a failure to load history must never make a name that exists look like it doesn't.** [useNameDetail.ts](src/hooks/useNameDetail.ts) sets the record _before_ fetching the timeline for exactly this reason — the original bug was a name resolving fine on mainnet but the detail view rendering "That name could not be found", because the history throw skipped `setDetail` entirely.
+
+### 6c. Query `normalizedLabel` with the homograph fold, not the raw label
+
+DPNS folds visually-confusable characters before storing `normalizedLabel`: `l`/`i` → `1` and `o` → `0`. So `latte` is stored as `1atte`, `hello` as `he110`, `oreo` as `0re0`. Lowercasing alone is **not** normalization — querying `normalizedLabel == "latte"` matches nothing, which is why search appeared broken for such names while `phez` (nothing foldable) worked fine.
+
+Use `toNormalizedLabel(sdk, input)` in [dpnsQueries.ts](src/dash/dpnsQueries.ts) for anything that queries `normalizedLabel`. It delegates to the SDK's `sdk.dpns.convertToHomographSafe` — **never reimplement the fold locally**, since a local copy would drift from consensus. It is async (WASM init), so call it inside the async path, not a `useState` initializer.
+
+`normalizeLabelInput` only trims and strips `.dash`; it is the input to the fold, not a substitute for it. `sdk.dpns.resolveName` takes a **full** name and folds internally, so [resolveRecipient.ts](src/dash/resolveRecipient.ts) needs no extra handling.
+
+Display always uses the record's real `label` (`latte`), never the folded form.
 
 ### 7. `orderBy` must be the serving index's trailing property
 
@@ -210,7 +229,7 @@ Repricing makes event count grow faster than candidate count. A successfully per
 | Fact | Value |
 | - | - |
 | Active protocol | testnet **13** · mainnet **12** (`latest` 13 on both) |
-| Document History contract | `6voHRaoiPcfmMhbqCA9dixH98xcgPQ9UEcuaXjpVu3LD` (same on both networks) |
+| Document History contract | `6voHRaoiPcfmMhbqCA9dixH98xcgPQ9UEcuaXjpVu3LD` (testnet only — absent on mainnet until v13) |
 | DPNS contract | `GWRSAVFMjXx8HpQFaNJMqBV7MBgMK4br5UESsB4S31Ec` |
 | `where` on `$price` over `domain` | **rejected** — "where clause on non indexed property error" |
 | Max `IN` clause | exactly **100** (101 → "invalid IN clause error") |

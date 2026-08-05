@@ -158,7 +158,11 @@ export function DiscoverView({
         <div className="stat-cell">
           <span className="label-caps">Sold in 30 days</span>
           {salesStats.count == null ? (
-            <span className="stat-cell__empty">No sales recorded yet</span>
+            <span className="stat-cell__empty">
+              {salesStats.unavailable
+                ? "Not available on this network"
+                : "No sales recorded yet"}
+            </span>
           ) : (
             <span className="stat-cell__value">
               {salesStats.count.toLocaleString("en-US")}
@@ -168,7 +172,11 @@ export function DiscoverView({
         <div className="stat-cell">
           <span className="label-caps">30d volume</span>
           {salesStats.volumeCredits == null ? (
-            <span className="stat-cell__empty">No sales recorded yet</span>
+            <span className="stat-cell__empty">
+              {salesStats.unavailable
+                ? "Not available on this network"
+                : "No sales recorded yet"}
+            </span>
           ) : (
             <span className="stat-cell__value">
               {formatDash(salesStats.volumeCredits, {

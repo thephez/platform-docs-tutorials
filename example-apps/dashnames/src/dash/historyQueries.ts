@@ -16,6 +16,7 @@
  */
 import { HISTORY_CONTRACT_ID, MAX_QUERY_LIMIT } from "./contracts";
 import type { HistoryEvent, StreamName } from "./listingTypes";
+import { errorMessage } from "../lib/logger";
 import {
   docId,
   docOwnerId,
@@ -26,6 +27,15 @@ import {
   type DocumentHandle,
 } from "../lib/safeDoc";
 import type { DashSdk, OrderByClause } from "./types";
+
+/**
+ * True when the History contract doesn't exist on this network — it is created
+ * by the v13 upgrade, which mainnet hasn't activated yet. Same contract ID once
+ * it does. Matched narrowly so real query failures still surface.
+ */
+export function isMissingContractError(err: unknown): boolean {
+  return errorMessage(err).toLowerCase().includes("contract not found");
+}
 
 /**
  * Normalizes one history document.
@@ -93,14 +103,20 @@ export async function fetchStreamPage({
   const where: unknown[][] = [["dataContractId", "==", dataContractId]];
   if (sinceMs != null) where.push(["$createdAt", ">=", sinceMs]);
 
-  const results = await sdk.documents.query({
-    dataContractId: HISTORY_CONTRACT_ID,
-    documentTypeName: type,
-    where,
-    orderBy: BY_CREATED_AT,
-    limit,
-    ...(startAfter ? { startAfter } : {}),
-  });
+  let results: unknown;
+  try {
+    results = await sdk.documents.query({
+      dataContractId: HISTORY_CONTRACT_ID,
+      documentTypeName: type,
+      where,
+      orderBy: BY_CREATED_AT,
+      limit,
+      ...(startAfter ? { startAfter } : {}),
+    });
+  } catch (err) {
+    if (!isMissingContractError(err)) throw err;
+    return [];
+  }
 
   signal?.throwIfAborted();
 
@@ -133,16 +149,22 @@ export async function fetchDocumentHistory({
 }: DocumentHistoryParams): Promise<HistoryEvent[]> {
   signal?.throwIfAborted();
 
-  const results = await sdk.documents.query({
-    dataContractId: HISTORY_CONTRACT_ID,
-    documentTypeName: type,
-    where: [
-      ["dataContractId", "==", dataContractId],
-      ["documentId", "==", documentId],
-    ],
-    orderBy: BY_CREATED_AT,
-    limit,
-  });
+  let results: unknown;
+  try {
+    results = await sdk.documents.query({
+      dataContractId: HISTORY_CONTRACT_ID,
+      documentTypeName: type,
+      where: [
+        ["dataContractId", "==", dataContractId],
+        ["documentId", "==", documentId],
+      ],
+      orderBy: BY_CREATED_AT,
+      limit,
+    });
+  } catch (err) {
+    if (!isMissingContractError(err)) throw err;
+    return [];
+  }
 
   signal?.throwIfAborted();
 
@@ -184,14 +206,20 @@ export async function fetchRecentEvents({
   // otherwise return the oldest records while calling them "recent".
   for (;;) {
     signal?.throwIfAborted();
-    const results = await sdk.documents.query({
-      dataContractId: HISTORY_CONTRACT_ID,
-      documentTypeName: type,
-      where: [["dataContractId", "==", dataContractId]],
-      orderBy: BY_CREATED_AT,
-      limit: MAX_QUERY_LIMIT,
-      ...(startAfter ? { startAfter } : {}),
-    });
+    let results: unknown;
+    try {
+      results = await sdk.documents.query({
+        dataContractId: HISTORY_CONTRACT_ID,
+        documentTypeName: type,
+        where: [["dataContractId", "==", dataContractId]],
+        orderBy: BY_CREATED_AT,
+        limit: MAX_QUERY_LIMIT,
+        ...(startAfter ? { startAfter } : {}),
+      });
+    } catch (err) {
+      if (!isMissingContractError(err)) throw err;
+      return [];
+    }
     signal?.throwIfAborted();
 
     const docs = toDocumentArray(results);

@@ -286,8 +286,33 @@ export async function fetchDomainsByIdentity({
     .filter((r): r is DomainRecord => r != null);
 }
 
-/** Normalizes user input to a DPNS label: lowercased, `.dash` suffix removed. */
+/**
+ * Trims user input to a bare label: lowercased, `.dash` suffix removed.
+ *
+ * NOT sufficient for a `normalizedLabel` query on its own — see
+ * `toNormalizedLabel`, which additionally applies DPNS's homograph fold.
+ */
 export function normalizeLabelInput(input: string): string {
   const lower = input.trim().toLowerCase();
   return lower.endsWith(".dash") ? lower.slice(0, -".dash".length) : lower;
+}
+
+/**
+ * Converts user input to the `normalizedLabel` DPNS actually stores.
+ *
+ * DPNS folds visually-confusable characters so lookalike names can't coexist:
+ * `l`/`i` -> `1` and `o` -> `0`. So `latte` is stored as `1atte` and `hello` as
+ * `he110`. Querying `normalizedLabel == "latte"` matches nothing — the reason
+ * mainnet search appeared broken for such names.
+ *
+ * The fold is the SDK's own (`dpnsConvertToHomographSafe` in WASM), never
+ * reimplemented here: a local copy would drift from consensus.
+ *
+ * SDK method: sdk.dpns.convertToHomographSafe
+ */
+export async function toNormalizedLabel(
+  sdk: DashSdk,
+  input: string,
+): Promise<string> {
+  return sdk.dpns.convertToHomographSafe(normalizeLabelInput(input));
 }

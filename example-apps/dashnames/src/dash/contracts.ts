@@ -5,10 +5,10 @@
  * SDK module has loaded. Never add an SDK import (even type-only would be
  * fine, but a value import would drag the ~8 MB bundle onto the boot path).
  *
- * Both IDs verified live on 2026-08-05 — identical on testnet and mainnet.
+ * Both IDs verified live on 2026-08-05.
  */
 
-/** DPNS — the `domain` documents that are the tradeable asset. */
+/** DPNS — the `domain` documents that are the tradeable asset. Exists on both networks. */
 export const DPNS_CONTRACT_ID = "GWRSAVFMjXx8HpQFaNJMqBV7MBgMK4br5UESsB4S31Ec";
 
 /**
@@ -16,6 +16,11 @@ export const DPNS_CONTRACT_ID = "GWRSAVFMjXx8HpQFaNJMqBV7MBgMK4br5UESsB4S31Ec";
  * `purchase`, and `transfer` events. DPNS opted into it at protocol v13, which
  * is what makes listing discovery possible at all: `$price` is not indexed on
  * `domain`, so there is no way to ask Platform "what is for sale".
+ *
+ * NOT YET ON MAINNET: the v13 upgrade creates this contract, and mainnet is on
+ * v12 — queries there fail with "Data contract not found". The ID is
+ * deterministic, so it stays single-valued and becomes correct once mainnet
+ * activates v13; see `isMissingContractError` in historyQueries.ts.
  */
 export const HISTORY_CONTRACT_ID =
   "6voHRaoiPcfmMhbqCA9dixH98xcgPQ9UEcuaXjpVu3LD";

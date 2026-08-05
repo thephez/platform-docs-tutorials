@@ -112,6 +112,40 @@ describe("fetchSalesStats", () => {
     expect(range[2]).toEqual([window.fromMs, window.toMs]);
   });
 
+  it("flags unavailable — NOT 'no sales' — when the contract does not exist", async () => {
+    // Mainnet (v12) has no History contract yet. An empty stat strip there would
+    // wrongly read as "nobody is trading" rather than "not on this network".
+    const { sdk } = makeSdk({
+      count: async () => {
+        throw new Error("Data contract not found");
+      },
+    });
+    const stats = await fetchSalesStats({
+      sdk,
+      dataContractId: DPNS_CONTRACT_ID,
+      window,
+    });
+    expect(stats).toEqual({
+      count: null,
+      volumeCredits: null,
+      unavailable: true,
+    });
+  });
+
+  it("flags unavailable when the sum call is the one that finds no contract", async () => {
+    const { sdk } = makeSdk({
+      sum: async () => {
+        throw new Error("Data contract not found");
+      },
+    });
+    const stats = await fetchSalesStats({
+      sdk,
+      dataContractId: DPNS_CONTRACT_ID,
+      window,
+    });
+    expect(stats.unavailable).toBe(true);
+  });
+
   it("keeps the count when only the volume aggregate is empty", async () => {
     const { sdk } = makeSdk({
       sum: async () => {

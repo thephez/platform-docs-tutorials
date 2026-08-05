@@ -49,16 +49,27 @@ export function useNameDetail({
       const record = await fetchDomainById({ sdk, documentId });
       if (requestId.current !== id) return;
 
+      // The record is shown even when the timeline can't be loaded: history is a
+      // separate contract that may not exist on this network, and a name that
+      // resolves must never render as "not found".
+      setDetail({ record, ownership: [], priceHistory: [] });
+
       const byType = new Map<string, HistoryEvent[]>();
-      for (const type of STREAM_NAMES) {
-        const events = await fetchDocumentHistory({
-          sdk,
-          type,
-          dataContractId: DPNS_CONTRACT_ID,
-          documentId,
-        });
+      try {
+        for (const type of STREAM_NAMES) {
+          const events = await fetchDocumentHistory({
+            sdk,
+            type,
+            dataContractId: DPNS_CONTRACT_ID,
+            documentId,
+          });
+          if (requestId.current !== id) return;
+          byType.set(type, events);
+        }
+      } catch (err) {
         if (requestId.current !== id) return;
-        byType.set(type, events);
+        setError(errorMessage(err));
+        return;
       }
 
       setDetail({
