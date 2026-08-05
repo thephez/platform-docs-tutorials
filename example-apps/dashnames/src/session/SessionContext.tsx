@@ -49,9 +49,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // Guards against a slow connect for network A resolving after the user has
   // already switched to network B.
   const connectionId = useRef(0);
+  // Separately guards sign-in: key derivation and identity reads can outlive a
+  // network switch unless their completion is tied to the originating session.
+  const authenticationId = useRef(0);
 
   const connect = useCallback(async (network: Network) => {
     const id = ++connectionId.current;
+    authenticationId.current += 1;
     setState((prev) => ({
       ...prev,
       status: "connecting",
@@ -112,16 +116,25 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const login = useCallback(
     async (mnemonic: string) => {
       const sdk = state.sdk;
+      const network = state.network;
       if (!sdk) throw new Error("Not connected yet.");
+      const id = ++authenticationId.current;
+      const assertCurrent = () => {
+        if (authenticationId.current !== id) {
+          throw new Error("Sign-in was cancelled because the network changed.");
+        }
+      };
 
       const core = await loadSdkCore();
+      assertCurrent();
       // The mnemonic enters the key manager here and is not retained anywhere
       // else in the app.
       const keyManager = (await core.IdentityKeyManager.create({
         sdk,
         mnemonic,
-        network: state.network,
+        network,
       })) as unknown as DashKeyManager;
+      assertCurrent();
 
       const identityId = keyManager.identityId ?? null;
       if (!identityId) {
@@ -134,21 +147,27 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         sdk.identities.balance(identityId).catch(() => null),
         sdk.dpns.username(identityId).catch(() => null),
       ]);
+      assertCurrent();
 
       setState((prev) => ({
-        ...prev,
-        status: "authenticated",
-        keyManager,
-        identityId,
-        identityName: identityName ?? null,
-        balance,
-        error: null,
+        ...(prev.network === network && prev.sdk === sdk
+          ? {
+              ...prev,
+              status: "authenticated" as const,
+              keyManager,
+              identityId,
+              identityName: identityName ?? null,
+              balance,
+              error: null,
+            }
+          : prev),
       }));
     },
     [state.sdk, state.network],
   );
 
   const logout = useCallback(() => {
+    authenticationId.current += 1;
     setState((prev) => ({
       ...prev,
       status: prev.sdk ? "readonly" : "idle",
@@ -160,6 +179,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setNetwork = useCallback((network: Network) => {
+    authenticationId.current += 1;
     saveNetwork(network);
     setState((prev) =>
       prev.network === network ? prev : { ...prev, network },

@@ -5,7 +5,7 @@
  * of `@dashevo/evo-sdk` (type-only is fine). The SDK arrives through the cached
  * dynamic loaders inside SessionContext.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DOMAIN_DOCUMENT_TYPE, DPNS_CONTRACT_ID } from "./dash/contracts";
 import {
   fetchDomainById,
@@ -76,6 +76,7 @@ function Shell() {
   const [resolving, setResolving] = useState(false);
   const [resolvedId, setResolvedId] = useState<string | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
+  const recipientRequestId = useRef(0);
 
   const listingsState = useListings({ sdk, network, log: consoleLogger });
   const { listings, phase, progress, lastSyncedAt, refresh, rebuild } =
@@ -263,9 +264,11 @@ function Shell() {
 
   const handleRecipientChange = useCallback(
     async (value: string) => {
+      const requestId = ++recipientRequestId.current;
       const trimmed = value.trim();
       setResolvedId(null);
       setResolveError(null);
+      setResolving(false);
       if (!sdk || !trimmed) return;
 
       const mode = classifyRecipientInput(trimmed);
@@ -279,12 +282,14 @@ function Shell() {
       setResolving(true);
       try {
         const id = await resolveDpnsName(sdk, trimmed);
+        if (recipientRequestId.current !== requestId) return;
         if (id) setResolvedId(id);
         else setResolveError("No identity is registered for that name.");
       } catch (err) {
+        if (recipientRequestId.current !== requestId) return;
         setResolveError(errorMessage(err));
       } finally {
-        setResolving(false);
+        if (recipientRequestId.current === requestId) setResolving(false);
       }
     },
     [sdk],
@@ -337,6 +342,7 @@ function Shell() {
             onBuy={setBuyTarget}
             onSeeAll={() => setView("browse")}
             canBuy={canWrite}
+            buyerIdentityId={identityId}
             loadingSales={activity.loading}
             onRefresh={refresh}
             lookupName={lookupName}
@@ -355,6 +361,7 @@ function Shell() {
             onOpenListing={(l) => openDetail(l.documentId)}
             onBuy={setBuyTarget}
             canBuy={canWrite}
+            buyerIdentityId={identityId}
             onRefresh={refresh}
           />
         )}
@@ -486,6 +493,7 @@ function Shell() {
         resolvedName={null}
         resolveError={resolveError}
         onClose={() => {
+          recipientRequestId.current += 1;
           setTransferTarget(null);
           setWriteError(null);
           setResolvedId(null);

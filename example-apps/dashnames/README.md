@@ -1,14 +1,12 @@
 # dashnames — a DPNS name marketplace
 
-Buy and sell DPNS usernames (`alice.dash`) on Dash Platform testnet.
+`dashnames` is a complete, browser-based example of discovering and trading DPNS usernames such as `alice.dash` on Dash Platform. Visitors can search names, browse verified listings, inspect ownership and asking-price history, and review protocol-recorded market activity without signing in. A funded identity can list, reprice, delist, purchase, or permanently transfer a name directly from the browser.
 
-Dash Platform 4.1 / protocol **v13** unblocked `transfer`, `priceUpdate`, and `purchase` on DPNS `domain` documents. The DPNS contract always declared `transferable: 1` and `tradeMode: 1`, but a hardcoded reject trigger blocked those transitions until v13. Names can now be listed and sold on-chain.
+The app is both a functional testnet marketplace and a focused Platform tutorial. It shows the parts a production UI cannot safely skip: proof-backed reads, lossless `u64` handling, revision-bound writes, active-protocol gating, identity signing, stale-listing detection immediately before purchase, and recovery of current marketplace state from append-only history.
 
 ## What this example demonstrates
 
-`$price` is **not** an indexed property on `domain`, so Platform cannot answer "which names are for sale" — a `where` clause on it is rejected outright. There is no server-side listings query to call.
-
-So this app builds the index itself, from the Document History system contract that DPNS opted into at v13:
+The central teaching problem is marketplace discovery. This app builds a local index from the Document History system contract that DPNS opted into at v13:
 
 1. Page every `priceUpdate` record for the DPNS contract (via the `byContract` index).
 2. Keep every document that has **ever** had a positive price.
@@ -17,21 +15,19 @@ So this app builds the index itself, from the Document History system contract t
 
 **History nominates candidates; the current document decides.** That one rule makes the index correct across delisting, purchase, transfer, and repricing without special-casing any of them — a sale and a transfer both clear the price without writing any price-update record at all.
 
-The index is persisted per network and tailed incrementally on later visits.
+The resulting listing snapshot and its three independent history watermarks are persisted atomically per network. Later visits tail `priceUpdate`, `purchase`, and `transfer` incrementally, while every purchase still re-fetches the current domain immediately before signing. The local index is a discovery aid; current Platform state is always authoritative.
 
 ## Quick start
 
 ```bash
 nvm use          # Node 22.22.x
-npm install
+npm ci
 npm run dev
 ```
 
 Browsing, search, and history need no sign-in. To list, buy, or transfer, open **Settings** (the identity chip, top right) and sign in with a testnet recovery phrase.
 
 Requires a funded testnet identity that already owns a name — this app trades existing names and does not register them. Create one with the repo's [`1-Identities-and-Names/name-register.mjs`](../../1-Identities-and-Names/name-register.mjs) first, then list it here.
-
-> Use a **20+ character** label. Labels matching `^[a-zA-Z01-]{3,19}$` trigger a masternode vote contest and won't be yours for weeks.
 
 Other scripts:
 
@@ -49,12 +45,7 @@ npm run preview        # serve production build locally
 
 ## Network support
 
-| Network | Protocol | Trading |
-| - | - | - |
-| testnet | v13 | ✅ works |
-| mainnet | v12 | ❌ writes disabled — browsing and history still work |
-
-The app defaults to testnet and shows an explanatory banner on any network below v13. The gate reads the network's **active platform protocol version** — `version.protocol.drive.current` from `sdk.system.status()`, which is a protocol version (13), not a Drive software release (4.1.0) — and fails closed when it can't be determined.
+The app defaults to testnet and shows an explanatory banner on any network below v13. The gate reads the network's **active platform protocol version** — `version.protocol.drive.current` from `sdk.system.status()`, which is a protocol version — and fails closed when it can't be determined.
 
 ## Contracts
 
@@ -97,11 +88,13 @@ Every SDK call lives under [`src/dash/`](./src/dash/), one file per concern, eac
 ## Tests
 
 ```bash
-npm run test      # Vitest: 10 suites over the index, read layer, writes, and components
+npm run test      # Vitest: index, read layer, writes, and component regressions
 npm run test:e2e  # Playwright: read-only smoke suite against real testnet
 ```
 
 The Playwright suite performs no chain writes and needs no credentials, so it always runs. The write paths (list, reprice, delist, purchase, transfer) are covered by unit tests only — see [CLAUDE.md](CLAUDE.md) for what has and hasn't been exercised live.
+
+Pull requests and pushes affecting this app or the shared SDK core run the dedicated [`DashNames CI`](../../.github/workflows/dashnames-ci.yml) workflow, which installs from the lockfile, runs Vitest, typechecks, and builds the production bundle.
 
 ## Limitations
 

@@ -175,23 +175,48 @@ export async function fetchRecentEvents({
   limit?: number;
   signal?: AbortSignal;
 }): Promise<HistoryEvent[]> {
-  signal?.throwIfAborted();
+  const events: HistoryEvent[] = [];
+  const seen = new Set<string>();
+  let startAfter: string | undefined;
 
-  const results = await sdk.documents.query({
-    dataContractId: HISTORY_CONTRACT_ID,
-    documentTypeName: type,
-    where: [["dataContractId", "==", dataContractId]],
-    orderBy: BY_CREATED_AT,
-    limit,
-  });
+  // The server currently ignores descending order. Page the complete ascending
+  // stream, then sort and take the requested newest N; one ascending page would
+  // otherwise return the oldest records while calling them "recent".
+  for (;;) {
+    signal?.throwIfAborted();
+    const results = await sdk.documents.query({
+      dataContractId: HISTORY_CONTRACT_ID,
+      documentTypeName: type,
+      where: [["dataContractId", "==", dataContractId]],
+      orderBy: BY_CREATED_AT,
+      limit: MAX_QUERY_LIMIT,
+      ...(startAfter ? { startAfter } : {}),
+    });
+    signal?.throwIfAborted();
 
-  signal?.throwIfAborted();
+    const docs = toDocumentArray(results);
+    if (docs.length === 0) break;
 
-  const events = toDocumentArray(results)
-    .map((doc) => toHistoryEvent(type, doc))
-    .filter((e): e is HistoryEvent => e != null);
+    let added = 0;
+    for (const doc of docs) {
+      const event = toHistoryEvent(type, doc);
+      if (!event || seen.has(event.id)) continue;
+      seen.add(event.id);
+      events.push(event);
+      added += 1;
+    }
 
-  return sortEventsDesc(events);
+    if (docs.length < MAX_QUERY_LIMIT) break;
+    const cursor = docId(docs[docs.length - 1]);
+    if (!cursor || cursor === startAfter || added === 0) {
+      throw new Error(
+        `Recent ${type} pagination stalled — refusing to return an incomplete feed.`,
+      );
+    }
+    startAfter = cursor;
+  }
+
+  return sortEventsDesc(events).slice(0, Math.max(0, limit));
 }
 
 /**

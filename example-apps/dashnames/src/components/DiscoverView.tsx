@@ -42,6 +42,7 @@ export function DiscoverView({
   onBuy,
   onSeeAll,
   canBuy,
+  buyerIdentityId,
   loadingSales,
   onRefresh,
   lookupName,
@@ -62,6 +63,7 @@ export function DiscoverView({
   onBuy: (listing: Listing) => void;
   onSeeAll: () => void;
   canBuy: boolean;
+  buyerIdentityId: string | null;
   loadingSales: boolean;
   onRefresh: () => void;
   /** Resolves a sale record's documentId to its DPNS label. */
@@ -218,6 +220,7 @@ export function DiscoverView({
                 onOpen={onOpenListing}
                 onBuy={onBuy}
                 canBuy={canBuy}
+                buyerIdentityId={buyerIdentityId}
               />
             ))}
           </div>

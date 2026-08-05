@@ -35,6 +35,7 @@ export function BrowseView({
   onOpenListing,
   onBuy,
   canBuy,
+  buyerIdentityId,
   onRefresh,
 }: {
   listings: Listing[];
@@ -48,6 +49,7 @@ export function BrowseView({
   onOpenListing: (listing: Listing) => void;
   onBuy: (listing: Listing) => void;
   canBuy: boolean;
+  buyerIdentityId: string | null;
   onRefresh: () => void;
 }) {
   const visible = applyFilters(listings, filters, historyFacts);
@@ -117,6 +119,7 @@ export function BrowseView({
                   onOpen={onOpenListing}
                   onBuy={onBuy}
                   canBuy={canBuy}
+                  buyerIdentityId={buyerIdentityId}
                 />
               ))}
             </div>

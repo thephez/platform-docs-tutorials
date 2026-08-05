@@ -14,6 +14,7 @@ export function NameTile({
   onOpen,
   onBuy,
   canBuy,
+  buyerIdentityId,
 }: {
   listing: Listing;
   /** "4 char · 6h ago" on discover; just "3 char" on browse. */
@@ -21,6 +22,8 @@ export function NameTile({
   onOpen: (listing: Listing) => void;
   onBuy?: (listing: Listing) => void;
   canBuy?: boolean;
+  /** Suppresses self-purchase; owners manage their listing from My names. */
+  buyerIdentityId?: string | null;
 }) {
   const metaText =
     meta ?? `${listing.label.length} char · ${relativeTime(listing.seenAt)}`;
@@ -47,7 +50,7 @@ export function NameTile({
       <div className="name-tile__meta">{metaText}</div>
       <div className="name-tile__price-row">
         <Price credits={listing.price} compact className="name-tile__price" />
-        {canBuy && onBuy && (
+        {canBuy && listing.ownerId !== buyerIdentityId && onBuy && (
           <button
             type="button"
             className="name-tile__buy"

@@ -77,6 +77,15 @@ describe("readBigInt", () => {
     expect(readBigInt(undefined)).toBeNull();
     expect(readBigInt(null)).toBeNull();
   });
+
+  it("rejects unsafe or fractional numbers instead of preserving corruption", () => {
+    expect(readBigInt(Number.MAX_SAFE_INTEGER + 1)).toBeNull();
+    expect(readBigInt(1.5)).toBeNull();
+    expect(readBigInt(Number.POSITIVE_INFINITY)).toBeNull();
+    expect(readBigInt(Number.MAX_SAFE_INTEGER)).toBe(
+      BigInt(Number.MAX_SAFE_INTEGER),
+    );
+  });
 });
 
 describe("hasSalePrice", () => {

@@ -149,8 +149,14 @@ async function drainStream({
         `History pagination stalled on ${type} at ${last.id} — refusing to advance the watermark.`,
       );
     }
-    // A full page that added nothing new would spin forever.
-    if (added === 0) break;
+    // A full page that added nothing new would spin forever. Treat this as a
+    // failed sync rather than returning a truncated stream whose watermark the
+    // caller could persist.
+    if (added === 0) {
+      throw new Error(
+        `History pagination repeated a full page on ${type} — refusing to advance the watermark.`,
+      );
+    }
     startAfter = last.id;
   }
 

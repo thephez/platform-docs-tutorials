@@ -124,8 +124,11 @@ export function readBigInt(value: unknown): bigint | null {
   if (value == null) return null;
   if (typeof value === "bigint") return value;
   if (typeof value === "number") {
-    if (!Number.isFinite(value)) return null;
-    return BigInt(Math.trunc(value));
+    // Once an integer exceeds Number.MAX_SAFE_INTEGER its exact u64 value may
+    // already be rounded; converting that rounded number to bigint would make
+    // the corruption look authoritative. Numeric fields must also be integers.
+    if (!Number.isSafeInteger(value)) return null;
+    return BigInt(value);
   }
   if (typeof value === "string" && /^-?\d+$/.test(value)) return BigInt(value);
   return null;
