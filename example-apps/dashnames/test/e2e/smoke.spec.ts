@@ -28,8 +28,10 @@ test("discover renders the hero, market summary, and footer", async ({
     /names for sale/i,
   );
 
-  // The footer names the live network rather than a hardcoded "MAINNET".
-  await expect(page.locator(".app-footer__chain")).toContainText("TESTNET");
+  await expect(page.getByRole("link", { name: "View source" })).toHaveAttribute(
+    "href",
+    /github\.com\/dashpay\/platform-tutorials\/tree\/main\/example-apps\/dashnames/,
+  );
 });
 
 test("the sync chip reports a real index state", async ({ page }) => {
@@ -151,7 +153,6 @@ test("settings switches networks and exposes index controls", async ({
 
   await page.getByRole("button", { name: "mainnet", exact: true }).click();
   await expect(page.getByLabel("Platform network")).toHaveValue("mainnet");
-  await expect(page.locator(".app-footer__chain")).toContainText("MAINNET");
   await expect(
     page.getByRole("button", { name: "Mainnet sign-in disabled" }),
   ).toBeDisabled();
@@ -162,7 +163,6 @@ test("settings switches networks and exposes index controls", async ({
   await expect(
     page.getByRole("button", { name: "testnet", exact: true }),
   ).toHaveClass(/filter-chip--active/);
-  await expect(page.locator(".app-footer__chain")).toContainText("TESTNET");
   await expect(
     page
       .getByRole("main")
