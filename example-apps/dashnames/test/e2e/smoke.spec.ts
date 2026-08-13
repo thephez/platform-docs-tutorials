@@ -7,8 +7,8 @@ import { expect, test } from "@playwright/test";
  * zero listings at any moment, so a spec that required a populated grid would be
  * flaky by construction. The empty states are themselves worth asserting.
  *
- * Desktop-only (one Playwright project): the app has no mobile layout, so there
- * is nothing to test at a small viewport.
+ * A single Playwright project covers desktop plus focused narrow-viewport
+ * regressions. There is no separate mobile browser/device matrix.
  */
 test.describe.configure({ mode: "serial" });
 
@@ -96,6 +96,53 @@ test("the header stays horizontally fixed between views", async ({ page }) => {
     await expect(wordmark).toBeVisible();
     expect((await wordmark.boundingBox())?.x).toBe(initialX);
   }
+});
+
+test("the narrow header and login sheet stay inside the viewport", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 700 });
+  await page.goto("/");
+
+  for (const view of ["Discover", "Browse", "My names", "Activity"]) {
+    await expect(
+      page.getByRole("button", { name: view, exact: true }),
+    ).toBeVisible();
+  }
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(375);
+
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  const modalBox = await page.locator(".modal--login").boundingBox();
+  expect(modalBox).not.toBeNull();
+  expect(modalBox!.x).toBe(0);
+  expect(modalBox!.width).toBe(375);
+
+  const advanced = page.getByRole("button", { name: "Advanced settings" });
+  await expect(advanced).toHaveAttribute("aria-expanded", "false");
+  await advanced.click();
+  await expect(advanced).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByLabel("Identity index")).toBeVisible();
+});
+
+test("the signed-in narrow-header CSS contract collapses the network pill", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 700 });
+  await page.goto("/");
+
+  // This test deliberately exercises only the responsive CSS contract without
+  // putting a real secret in CI. IdentityChip.test.tsx separately verifies that
+  // a genuinely signed-in IdentityChip emits this state class and its content.
+  await page.locator(".identity-chip").evaluate((chip) => {
+    chip.classList.add("identity-chip--signed-in");
+  });
+
+  await expect(page.getByLabel("Platform network")).toBeHidden();
+  const chipBox = await page.locator(".identity-chip").boundingBox();
+  expect(chipBox).not.toBeNull();
+  expect(chipBox!.x + chipBox!.width).toBeLessThanOrEqual(375);
 });
 
 test("activity renders the table and event-type filters", async ({ page }) => {

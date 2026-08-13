@@ -18,8 +18,8 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
 
-  // Desktop-only: the app has no mobile layout, so there is no second project.
-  // See CLAUDE.md "Scope decisions".
+  // Keep one browser project. Focused tests resize its viewport for the
+  // responsive rules; this is not a full mobile browser/device matrix.
   projects: [
     {
       name: "chromium-desktop",

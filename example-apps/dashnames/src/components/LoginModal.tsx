@@ -203,10 +203,12 @@ export function LoginModal({
           <>
             <button
               type="button"
-              className="btn btn--outline btn--sm"
+              className="login-advanced-toggle"
+              aria-expanded={showAdvanced}
               onClick={() => setShowAdvanced((value) => !value)}
             >
-              {showAdvanced ? "Hide" : "Show"} advanced settings
+              <span aria-hidden="true">▶</span>
+              Advanced settings
             </button>
             {showAdvanced && (
               <div>
@@ -226,19 +228,6 @@ export function LoginModal({
           </>
         )}
 
-        {session.network === "testnet" && (
-          <div className="login-bridge-callout">
-            Don&apos;t have a testnet identity?{" "}
-            <a
-              href="https://bridge.thepasta.org/"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Create one on Dash Bridge
-            </a>{" "}
-            — funded automatically in about 30 seconds.
-          </div>
-        )}
         {error && <div className="block-error">{error}</div>}
         <div className="modal__actions">
           <button
@@ -261,6 +250,19 @@ export function LoginModal({
             Cancel
           </button>
         </div>
+        {session.network === "testnet" && (
+          <div className="login-bridge-callout">
+            <span>Don&apos;t have a testnet identity?</span>
+            <a
+              href="https://bridge.thepasta.org/"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Create one on Dash Bridge →
+            </a>
+            <small>Funded automatically. ~30 seconds.</small>
+          </div>
+        )}
       </form>
     </Modal>
   );

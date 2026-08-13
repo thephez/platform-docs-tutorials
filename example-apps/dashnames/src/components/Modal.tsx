@@ -1,9 +1,10 @@
 /**
- * Modal shell: 390px wide card on `bg/surface`.
+ * Modal shell: a centered desktop card that becomes a full-width bottom sheet
+ * at the responsive breakpoint.
  *
  * Escape closes, focus moves into the dialog on open, and a backdrop click
- * dismisses. Desktop-only per the build decision — there is no bottom-sheet
- * variant.
+ * dismisses. While open, background scrolling is locked and focus remains in
+ * whichever control the user is interacting with across parent rerenders.
  */
 import { useEffect, useRef, type ReactNode } from "react";
 
@@ -25,16 +26,26 @@ export function Modal({
   children: ReactNode;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     }
     document.addEventListener("keydown", onKeyDown);
     cardRef.current?.focus();
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open]);
 
   if (!open) return null;
 

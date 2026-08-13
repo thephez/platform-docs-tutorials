@@ -244,7 +244,7 @@ export function DiscoverView({
           <h2 className="section__title">Recent sales</h2>
           <span className="section__note">From protocol purchase records</span>
         </div>
-        <div className="data-table">
+        <div className="data-table data-table--sales">
           <div
             className="data-table__row data-table__row--head"
             style={{ gridTemplateColumns: "1.4fr 1fr 1fr .8fr" }}
@@ -275,7 +275,7 @@ export function DiscoverView({
                 />
                 <span className="align-right">
                   {sale.price != null ? (
-                    <Price credits={sale.price} align="right" />
+                    <Price credits={sale.price} align="right" compactCredits />
                   ) : (
                     <span className="amount-dash">—</span>
                   )}

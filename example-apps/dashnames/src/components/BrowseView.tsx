@@ -117,7 +117,6 @@ export function BrowseView({
                 <NameTile
                   key={listing.documentId}
                   listing={listing}
-                  meta={`${listing.normalizedLabel.length} char`}
                   onOpen={onOpenListing}
                   onBuy={onBuy}
                   onManage={onManage}

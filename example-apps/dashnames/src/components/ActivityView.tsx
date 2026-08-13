@@ -89,7 +89,7 @@ export function ActivityView({
       </div>
 
       <div className="table-wrap">
-        <div className="data-table">
+        <div className="data-table data-table--activity">
           <div
             className="data-table__row data-table__row--head"
             style={{ gridTemplateColumns: COLUMNS }}
@@ -130,7 +130,11 @@ export function ActivityView({
                   />
                   <span className="align-right">
                     {showAmount && event.price != null ? (
-                      <Price credits={event.price} align="right" />
+                      <Price
+                        credits={event.price}
+                        align="right"
+                        compactCredits
+                      />
                     ) : (
                       <span className="amount-dash">—</span>
                     )}

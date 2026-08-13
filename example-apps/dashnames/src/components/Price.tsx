@@ -6,11 +6,12 @@
  * Takes `bigint` credits, never a number: prices legitimately exceed
  * Number.MAX_SAFE_INTEGER and every conversion here is integer math.
  */
-import { formatCredits, formatDash } from "../lib/format";
+import { formatCredits, formatCreditsCompact, formatDash } from "../lib/format";
 
 export function Price({
   credits,
   showCredits = true,
+  compactCredits = false,
   align = "left",
   className,
   minDecimals = 3,
@@ -18,6 +19,8 @@ export function Price({
   credits: bigint;
   /** Hide the exact integer where it would compete with other prices in a grid. */
   showCredits?: boolean;
+  /** Use an abbreviated credit value in dense cards; exact value remains in the title. */
+  compactCredits?: boolean;
   align?: "left" | "right";
   className?: string;
   minDecimals?: number;
@@ -32,7 +35,16 @@ export function Price({
         {formatDash(credits, { minDecimals })} DASH
       </span>
       {showCredits && (
-        <span className="price__credits">{formatCredits(credits)} credits</span>
+        <span
+          className="price__credits"
+          title={
+            compactCredits ? `${formatCredits(credits)} credits` : undefined
+          }
+        >
+          {compactCredits
+            ? `${formatCreditsCompact(credits)} credits`
+            : `${formatCredits(credits)} credits`}
+        </span>
       )}
     </span>
   );

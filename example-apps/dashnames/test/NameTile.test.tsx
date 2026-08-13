@@ -50,4 +50,20 @@ describe("NameTile", () => {
     expect(screen.getByText("1 DASH")).toBeTruthy();
     expect(screen.queryByText(/credits/i)).toBeNull();
   });
+
+  it("uses the listing age as the card metadata", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(60_000);
+    try {
+      const { container } = render(
+        <NameTile listing={listing} onOpen={vi.fn()} />,
+      );
+      const meta = container.querySelector(".name-tile__meta");
+
+      expect(meta).not.toBeNull();
+      expect(meta!.textContent).toBe("1m ago");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

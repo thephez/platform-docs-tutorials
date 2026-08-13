@@ -118,7 +118,10 @@ Pull requests and pushes affecting this app or the shared SDK core run the dedic
 - **Secrets are never persisted.** Recovery phrases and WIFs remain in
   component/key-manager memory only and are cleared when login closes,
   succeeds, is cancelled, or the network changes.
-- **Desktop-only.** No mobile layout was designed, and guessing at one produces work that gets thrown away.
+- **Desktop-first.** The handoff's low-risk responsive suggestions are applied
+  to name grids, information strips, and modals. Mobile navigation and the
+  browse filter sheet are not designed yet, so the app does not claim a
+  complete mobile layout or run a mobile Playwright project.
 - **Client-side scanning doesn't scale forever.** Cold start replays all price history _and_ re-fetches every name that was ever listed. A browser pays that once per profile, but a production marketplace would use a server-side indexer.
 
 See [CLAUDE.md](CLAUDE.md) for the full correctness rules, including why no numeric field is ever read through `toJSON()` ([dashpay/platform#3786](https://github.com/dashpay/platform/issues/3786)), and for the scope decisions behind the feature set above.

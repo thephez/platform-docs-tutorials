@@ -40,11 +40,18 @@ describe("formatCredits", () => {
 
 describe("formatCreditsCompact", () => {
   it("collapses large amounts to a single decimal", () => {
-    expect(formatCreditsCompact(31_000_000_000_000n)).toBe("31.0T");
+    expect(formatCreditsCompact(31_000_000_000_000n)).toBe("31T");
+    expect(formatCreditsCompact(31_500_000_000_000n)).toBe("31.5T");
   });
 
   it("leaves small amounts readable", () => {
     expect(formatCreditsCompact(999n)).toBe("999");
+  });
+
+  it("switches to a suffix at the compact-format boundary", () => {
+    expect(formatCreditsCompact(9_999_999n)).toBe("9,999,999");
+    expect(formatCreditsCompact(10_000_000n)).toBe("10M");
+    expect(formatCreditsCompact(10_500_000n)).toBe("10.5M");
   });
 });
 

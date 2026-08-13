@@ -92,8 +92,6 @@ body {
   font-family: var(--font-ui);
   font-size: 15px;
   -webkit-font-smoothing: antialiased;
-  /* Desktop-only design: keep the 1240px container from forcing the page to
-     scroll horizontally in a narrow window without inventing a mobile layout. */
   overflow-x: auto;
 }
 
@@ -146,6 +144,7 @@ h1 {
 .dpns-name {
   color: var(--text-primary);
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .dpns-name__suffix {
@@ -478,11 +477,6 @@ h1 {
 .badge--delisted {
   background: rgba(240, 193, 75, 0.13);
   color: var(--warning-amber);
-}
-
-.badge--primary {
-  background: var(--brand-blue-tint-badge);
-  color: var(--brand-blue-bright);
 }
 
 .badge--meta {
@@ -1626,6 +1620,7 @@ h1 {
   justify-content: center;
   padding: 24px;
   z-index: 50;
+  overscroll-behavior: contain;
 }
 
 .modal {
@@ -1633,6 +1628,7 @@ h1 {
   max-width: 100%;
   max-height: calc(100vh - 48px);
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--bg-surface);
   border: 1px solid var(--border-card);
   border-radius: 10px;
@@ -1737,7 +1733,38 @@ h1 {
   line-height: 1.5;
 }
 
+.login-advanced-toggle {
+  align-self: flex-start;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.login-advanced-toggle span {
+  display: inline-block;
+  margin-right: 5px;
+  font-size: 9px;
+  transition: transform 120ms ease;
+}
+
+.login-advanced-toggle[aria-expanded="true"] span {
+  transform: rotate(90deg);
+}
+
+.login-advanced-toggle:hover {
+  color: var(--text-high);
+}
+
 .login-bridge-callout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 4px;
   padding: 11px 12px;
   border: 1px dashed var(--border-control);
   border-radius: 8px;
@@ -1745,6 +1772,12 @@ h1 {
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.55;
+}
+
+.login-bridge-callout small {
+  flex-basis: 100%;
+  color: var(--text-muted);
+  font-size: 11px;
 }
 
 .login-bridge-callout a {
@@ -2100,6 +2133,485 @@ h1 {
 
 .status-line--info {
   color: var(--text-body);
+}
+
+/* -------------------------------------------------------------- responsive */
+@media (max-width: 1040px) {
+  .name-grid--6,
+  .name-grid--5 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 840px) {
+  html {
+    scrollbar-gutter: auto;
+  }
+
+  .app-header {
+    position: relative;
+    height: auto;
+    min-height: 104px;
+    padding: 14px 16px 12px;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 14px;
+  }
+
+  .app-header:has(.header-search) {
+    padding-bottom: 58px;
+  }
+
+  .app-header__left {
+    width: 100%;
+    min-width: 0;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 18px;
+  }
+
+  .wordmark {
+    font-size: 18px;
+  }
+
+  .app-nav {
+    width: 100%;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0;
+  }
+
+  .app-nav__item {
+    width: 100%;
+    min-width: 0;
+    min-height: 32px;
+    padding: 0 2px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .app-header__right {
+    position: absolute;
+    top: 9px;
+    right: 12px;
+    gap: 6px;
+  }
+
+  .header-network {
+    width: 84px;
+    padding: 0 8px;
+    font-size: 10px;
+  }
+
+  .header-settings {
+    display: none;
+  }
+
+  .identity-chip {
+    min-width: 0;
+    max-width: 92px;
+    padding: 0 9px;
+    overflow: hidden;
+  }
+
+  .identity-chip__name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .identity-chip__balance {
+    display: none;
+  }
+
+  .header-search {
+    position: absolute;
+    top: 104px;
+    left: 16px;
+    right: 16px;
+    width: auto;
+  }
+
+  .gate-banner {
+    padding: 11px 16px;
+    font-size: 11px;
+  }
+
+  .hero {
+    padding: 34px 20px 28px;
+  }
+
+  .hero__headline {
+    max-width: none;
+    font-size: clamp(30px, 9vw, 36px);
+  }
+
+  .hero__sub {
+    font-size: 13px;
+  }
+
+  .hero-search {
+    flex-direction: column;
+  }
+
+  .hero-search__field,
+  .hero-search__button {
+    width: 100%;
+  }
+
+  .hero-popular {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .market-stats {
+    gap: 0;
+    padding: 0 20px;
+  }
+
+  .market-stat {
+    min-height: 68px;
+    padding: 14px 10px 14px 0;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 7px;
+  }
+
+  .market-stat:nth-child(even) {
+    padding-left: 14px;
+  }
+
+  .section {
+    padding: 24px 20px;
+  }
+
+  .section__head,
+  .page-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .section__actions,
+  .page-head__actions,
+  .activity-filters {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .name-grid--6,
+  .name-grid--5 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .name-tile {
+    min-width: 0;
+    padding: 14px 12px;
+  }
+
+  .name-tile__name,
+  .name-tile__meta,
+  .price__dash,
+  .price__credits {
+    overflow-wrap: anywhere;
+  }
+
+  .name-tile__action {
+    display: none;
+  }
+
+  .market-stats,
+  .fact-strip {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .market-stat:nth-child(2),
+  .fact-cell:nth-child(2) {
+    border-right: 0;
+  }
+
+  .market-stat:nth-child(-n + 2),
+  .fact-cell:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .browse {
+    display: block;
+  }
+
+  .filter-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--border-default);
+    padding: 18px 20px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+  }
+
+  .results-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 16px 20px;
+  }
+
+  .results-toolbar__right {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .browse__grid {
+    padding: 18px 20px;
+  }
+
+  .browse__footnote,
+  .breadcrumb,
+  .page-head,
+  .portfolio,
+  .table-wrap,
+  .table-footnote,
+  .prose {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+
+  .detail {
+    grid-template-columns: 1fr;
+    padding: 0 20px 24px;
+  }
+
+  .detail__title {
+    font-size: 30px;
+  }
+
+  .buy-panel {
+    grid-row: 1;
+  }
+
+  .timeline-entry__head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .portfolio-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .portfolio-row__name-line {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .portfolio-row__name {
+    max-width: 100%;
+    text-align: left;
+  }
+
+  .portfolio-row__right {
+    justify-content: space-between;
+  }
+
+  .portfolio-row__value {
+    text-align: left;
+  }
+
+  .data-table--activity,
+  .data-table--sales {
+    background: transparent;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow: visible;
+  }
+
+  .data-table--activity .data-table__row--head,
+  .data-table--sales .data-table__row--head {
+    display: none;
+  }
+
+  .data-table--activity .data-table__row:not(.data-table__row--head),
+  .data-table--sales .data-table__row:not(.data-table__row--head) {
+    display: grid;
+    grid-template-columns: 1fr !important;
+    gap: 9px;
+    padding: 14px;
+    border: 1px solid var(--border-default);
+    border-radius: 9px;
+    background: var(--bg-surface);
+  }
+
+  .data-table--activity .data-table__row > *,
+  .data-table--sales .data-table__row > * {
+    display: grid;
+    grid-template-columns: 76px minmax(0, 1fr);
+    align-items: start;
+    gap: 10px;
+    min-width: 0;
+    text-align: left;
+  }
+
+  /* Desktop alignment helpers position the entire cell on the right. In the
+     labeled card layout each cell must span the card; only its value aligns. */
+  .data-table--activity .data-table__row > .align-right,
+  .data-table--sales .data-table__row > .align-right {
+    justify-self: stretch;
+    text-align: left;
+  }
+
+  .data-table--activity .data-table__cell-name,
+  .data-table--activity .data-table__cell-unresolved,
+  .data-table--sales .data-table__cell-name,
+  .data-table--sales .data-table__cell-unresolved {
+    width: auto;
+    overflow-wrap: anywhere;
+  }
+
+  .data-table--activity .data-table__row > :nth-child(1)::before {
+    content: "Event";
+  }
+  .data-table--activity .data-table__row > :nth-child(2)::before,
+  .data-table--sales .data-table__row > :nth-child(1)::before {
+    content: "Name";
+  }
+  .data-table--activity .data-table__row > :nth-child(3)::before {
+    content: "Amount";
+  }
+  .data-table--activity .data-table__row > :nth-child(4)::before {
+    content: "Parties";
+  }
+  .data-table--activity .data-table__row > :nth-child(5)::before {
+    content: "Block";
+  }
+  .data-table--sales .data-table__row > :nth-child(2)::before {
+    content: "Sale price";
+  }
+  .data-table--sales .data-table__row > :nth-child(3)::before {
+    content: "Buyer";
+  }
+  .data-table--sales .data-table__row > :nth-child(4)::before {
+    content: "When";
+  }
+
+  .data-table--activity .data-table__row > *::before,
+  .data-table--sales .data-table__row > *::before {
+    color: var(--text-muted);
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .data-table--activity .price,
+  .data-table--sales .price {
+    align-items: flex-start;
+  }
+
+  .app-footer {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 18px 20px;
+  }
+
+  .modal-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal,
+  .modal--login {
+    width: 100%;
+    max-width: none;
+    max-height: calc(100dvh - 24px);
+    overflow-y: auto;
+    border-radius: 14px 14px 0 0;
+    border-bottom: 0;
+  }
+
+  .modal--login .modal__head {
+    padding: 16px;
+  }
+
+  .modal--login .modal__heading {
+    align-items: center;
+  }
+
+  .modal--login .modal__heading > div {
+    min-width: 0;
+  }
+
+  .login-key-icon + div .modal__sub {
+    white-space: normal;
+  }
+
+  .modal--login .modal__sub {
+    margin-top: 4px;
+    font-size: 11px;
+  }
+
+  .login-modal__body {
+    gap: 16px;
+    padding: 16px;
+  }
+
+  .login-network-row {
+    padding-bottom: 2px;
+  }
+
+  .login-field {
+    gap: 6px;
+  }
+
+  .login-modal__body .recipient-input {
+    min-height: 44px;
+    height: 44px;
+    font-size: 13px;
+  }
+
+  .login-memory-hint {
+    display: flex;
+    font-size: 11px;
+  }
+
+  .login-memory-hint::before {
+    content: "◇";
+    margin-right: 6px;
+    color: var(--brand-blue-bright);
+  }
+
+  .login-modal__body .modal__actions .btn {
+    min-height: 44px;
+  }
+
+  .login-bridge-callout {
+    padding: 12px 14px;
+    border-radius: 12px;
+  }
+
+  .login-bridge-callout a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+    margin-top: 6px;
+    padding: 0 12px;
+    border: 1px solid var(--border-control);
+    border-radius: 999px;
+    text-decoration: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .app-header:has(.identity-chip--signed-in) .header-network {
+    display: none;
+  }
+
+  .app-header:has(.identity-chip--signed-in) .identity-chip {
+    max-width: min(150px, calc(100vw - 180px));
+  }
 }
 
 .network-toggle {

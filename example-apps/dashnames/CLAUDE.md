@@ -79,7 +79,7 @@ The discovery algorithm in [listingsIndex.ts](src/dash/listingsIndex.ts) is what
 - **List / reprice / delist** ([setPrice.ts](src/dash/setPrice.ts)): `sdk.documents.setPrice({ document, price: bigint, identityKey, signer })`. A price of `0n` delists.
 - **Buy** ([purchaseName.ts](src/dash/purchaseName.ts)): `sdk.documents.purchase({ document, buyerId, price: bigint, identityKey, signer })`.
 - **Transfer** ([transferName.ts](src/dash/transferName.ts)): `sdk.documents.transfer({ document, recipientId, identityKey, signer })`.
-- **DPNS name lookup**: `sdk.dpns.username(identityId)` ([useDpnsNames.ts](src/hooks/useDpnsNames.ts), `SessionContext`) and `sdk.dpns.resolveName(fullName)` ([resolveRecipient.ts](src/dash/resolveRecipient.ts)) for transfer recipients.
+- **DPNS name lookup**: `sdk.dpns.username(identityId)` ([useDpnsNames.ts](src/hooks/useDpnsNames.ts), `SessionContext`) and `sdk.dpns.resolveName(fullName)` ([resolveRecipient.ts](src/dash/resolveRecipient.ts)) for transfer recipients. The singular `username()` helper queries `records.identity` with `limit: 1` and no ordering, so it returns an arbitrary first associated name — **not** a protocol-designated primary name. Use it only as a compact identity label; never infer primary status from it.
 - **Label normalization**: `sdk.dpns.convertToHomographSafe(label)` via `toNormalizedLabel` ([dpnsQueries.ts](src/dash/dpnsQueries.ts)) — required before any `normalizedLabel` query. See [rule 6c](#6c-query-normalizedlabel-with-the-homograph-fold-not-the-raw-label).
 - **Balance**: `sdk.identities.balance(identityId)` → `bigint`, called from `SessionContext`.
 
@@ -191,7 +191,9 @@ Extraction to `example-apps/shared/marketplace/` is justified when a second cons
 
 ## Design intent
 
-[src/styles.css](src/styles.css)'s `:root` tokens are the design system: color, spacing, type scale, and the sync-chip states. The app is one committed dark theme — there is no light palette — and it is desktop-only at 1240px. Component JSDoc headers carry each view's layout constraints (grid columns, sidebar widths, modal sizing).
+[src/styles.css](src/styles.css)'s `:root` tokens are the design system: color, spacing, type scale, and the sync-chip states. The app is one committed dark theme — there is no light palette — and is desktop-first at 1240px with focused responsive rules below 1040px and 840px. Component JSDoc headers carry view-specific layout constraints; responsive overrides in `styles.css` are authoritative where sizing changes by breakpoint.
+
+At narrow widths, name grids collapse to 3 and then 2 columns, information strips become two-column grids, activity/sales tables become labeled cards, and modals become full-width bottom sheets. Modal open state locks document scrolling, and modal scroll containment must prevent the page behind it from taking over. At 420px and below, a signed-in header hides its redundant network selector; clicking the identity chip opens Settings and clicking it again returns to the previous view. Signed-out users retain the selector because their chip opens login instead of Settings.
 
 ## Scope decisions
 
@@ -208,7 +210,7 @@ The original design called for several features the SDK cannot support, plus a f
 | "Register a name" | **Out of scope.** | Registration needs preorder/commit plus contested-name voting — a substantial feature, and already covered by the repo's `name-register.mjs`. Leaving it out keeps the v13 gate uniform across **every** write path. |
 | Watch / watchlist, Top up credits | **Dropped.** | Neither has a destination in this app — the buttons would lead nowhere. |
 | Nav: `Discover · My names · Sell · Activity` | `Discover · Browse · My names · Activity` — **Sell dropped, Browse added.** | Sell would have been My names filtered to listable rows — the same component sitting right beside itself with fewer rows — while the full results grid got no header entry at all, reachable only via Discover's "See all N →". Browse takes the slot instead. Listing is not lost: it starts from the per-row **List for sale** button in My names. A dedicated list-a-name picker would need a UI this app doesn't have. |
-| Mobile / responsive layout | **Desktop-only at 1240px.** One Playwright project. | No mobile layout was ever designed, and inventing one produces layout that gets thrown away. |
+| Mobile / responsive layout | **Desktop-first at 1240px.** Name grids collapse 6/5→3→2 columns, stat/fact strips become 2-column, data tables become labeled cards, and modals become bottom sheets. One Playwright project includes focused 375px viewport coverage. | These are the handoff's low-risk suggestions. Mobile navigation remains the same four-item nav and the browse filters remain inline rather than becoming a dedicated filter sheet, so this is focused responsive support rather than a separate mobile interaction design. |
 | Deferring discovery to a server-side indexer | The client **does** scan history. | There is no indexer, and that scan is exactly the technique this app demonstrates. The UI accounts for it honestly — the sync chip and the "indexed locally" footnote — so no visual compromise. |
 
 ## Limitations
@@ -245,19 +247,14 @@ Repricing makes event count grow faster than candidate count. A successfully per
 
 Vitest ([test/](test/), flat directory, files named after the subject under test — **not** co-located next to source, **not** mirrored against `src/`). Default env is `node`; DOM tests opt in with a `// @vitest-environment jsdom` pragma at the top of the file. There is no global setup file, matching the sibling apps — which is why component tests need explicit `afterEach(cleanup)` (see [Gotchas](#gotchas)). Coverage: `npm run test:coverage` runs the suite under v8.
 
-The suites, by what they protect:
+The suite is organized by behavior:
 
-- [safeDoc.test.ts](test/safeDoc.test.ts) — the lossless read layer, incl. `bytesToBase58` verified against the SDK's own encoding. Guards [rules 1–3](#1-never-read-a-numeric-field-through-tojson).
-- [listingsIndex.test.ts](test/listingsIndex.test.ts) — the discovery algorithm: candidate nomination, current-document confirmation, and the boundary-replay/watermark discipline. Guards [rules 4–5](#4-history-nominates-candidates-the-current-document-decides).
-- [listingsStore.test.ts](test/listingsStore.test.ts) — atomic snapshot round-trip, incl. the bigint↔string localStorage boundary and the drop-on-failed-write rule.
-- [historyAggregates.test.ts](test/historyAggregates.test.ts) — the `$createdAt` bound and the empty-set proof-error branch. Guards [rule 6](#6-aggregates-two-rules-that-break-the-queries).
-- [protocolVersion.test.ts](test/protocolVersion.test.ts) — `current` vs `latest`, the WASM-handle `toJSON()` fallback, and fail-closed on unknown. Guards [rule 9](#9-gate-on-the-active-protocol-version-and-know-which-field-that-is).
-- [writeOps.test.ts](test/writeOps.test.ts) — the three writes: revision bump, auth-key choice, and that each rejects before any SDK call when `salesEnabled` is false.
-- [BuyModal.test.tsx](test/BuyModal.test.tsx) — confirm-time revalidation and quote expiry. Guards [rule 10](#10-freshness-means-at-confirm-not-at-open).
-- [NameCell.test.tsx](test/NameCell.test.tsx) — label resolution with the dimmed truncated-ID fallback. Guards the `documentId` gotcha.
-- [filters.test.ts](test/filters.test.ts) / [format.test.ts](test/format.test.ts) — browse filtering/sorting and all-bigint formatting.
+- **Lossless reads and protocol safety** cover raw document decoding, bigint formatting, aggregate-query edge cases, and active protocol-version gating. [safeDoc.test.ts](test/safeDoc.test.ts) is the landmark suite for [rules 1–3](#1-never-read-a-numeric-field-through-tojson).
+- **Discovery and persistence** cover candidate nomination, current-document confirmation, boundary replay/watermarks, filtering, and atomic localStorage snapshots. See [listingsIndex.test.ts](test/listingsIndex.test.ts) for the core discovery invariants in [rules 4–5](#4-history-nominates-candidates-the-current-document-decides).
+- **Writes and purchase safety** cover revision/auth-key selection, the `salesEnabled` fail-closed gate, confirm-time revalidation, and quote expiry. The key suites are [writeOps.test.ts](test/writeOps.test.ts) and [BuyModal.test.tsx](test/BuyModal.test.tsx).
+- **Components and responsive UI** cover modal focus/scroll behavior, authentication state, name resolution, card actions, pricing, and metadata across desktop and narrow layouts.
 
-E2E ([test/e2e/smoke.spec.ts](test/e2e/smoke.spec.ts), Playwright, port 5185, real testnet, chromium only, serial). **Read-only — no chain writes, no credentials needed**, so it always runs. It asserts rendering and navigation, not live listing data: testnet may have zero listings at any moment, so a spec requiring a populated grid would be flaky by construction — the empty states are themselves asserted. **One Playwright project** (desktop only); there is no mobile layout to test. Write flows are covered by unit tests only — see [Verified on testnet](#verified-on-testnet-2026-08-05) for what has and hasn't run against the live contract.
+E2E ([test/e2e/smoke.spec.ts](test/e2e/smoke.spec.ts), Playwright, port 5185, real testnet, chromium only, serial). **Read-only — no chain writes, no credentials needed**, so it always runs. It asserts rendering and navigation, not live listing data: testnet may have zero listings at any moment, so a spec requiring a populated grid would be flaky by construction — the empty states are themselves asserted. There is **one Playwright project**; focused tests resize it to 375px to cover real signed-out header/login behavior and the signed-in narrow-header CSS contract without creating a separate mobile browser/device matrix. The CSS-contract test deliberately injects the signed-in state class; [IdentityChip.test.tsx](test/IdentityChip.test.tsx) separately verifies that the real component emits that class. Write flows are covered by unit tests only — see [Verified on testnet](#verified-on-testnet-2026-08-05) for what has and hasn't run against the live contract.
 
 ## Performance — load-anchor rules
 
@@ -276,6 +273,8 @@ grep 'from "[^"]*evo-sdk' dist/assets/index-*.js   # must return nothing
 - **History records identify a name only by `documentId`** — there is no label on a `priceUpdate` / `purchase` / `transfer` record. Rendering that ID raw is misleading: it is neither a name nor an identity, so under a column headed "Name" it reads as garbage. [useDocumentLabels.ts](src/hooks/useDocumentLabels.ts) batch-resolves IDs to labels (module-level cache, same `$id IN` path as the index) and [NameCell.tsx](src/components/NameCell.tsx) renders the result, falling back to a visibly-dimmed truncated ID until it arrives. Any new table over history events must use `NameCell`, not `shortId(event.documentId)`.
 - **`shortId()` on `ownerId` / `sellerId` / `toIdentityId` is correct** — those genuinely are identities, and `XXXX…XXXX` truncation is the intended rendering for them. The bug above was only ever about _document_ IDs standing in for names.
 - **Secrets** — the mnemonic is a `login()` parameter that flows into the keyManager closure and nowhere else. Never state, never a ref, never localStorage.
+- **There is no DPNS primary-name designation in the current contract** — current domain documents use only `records.identity`, and that index is not unique. `sdk.dpns.username(identityId)` is an unordered `limit: 1` convenience query. Do not add a `PRIMARY` badge or treat its result as authoritative selection.
+- **Modal focus effects run only on open-state changes** — an inline `onClose` function changes identity on every parent render. Including it directly in the focus effect dependencies re-focuses the modal container and steals focus from controls such as the identity-index input. Keep the latest close callback in a ref instead.
 - **Transfer uses the AUTHENTICATION key**, not the TRANSFER-purpose key — Platform rejects TRANSFER-purpose keys for document state transitions. `getAuth()` already returns the right one.
 - **All mutations bump the revision** — fetch, then `revision = BigInt(revision) + 1n`. Platform rejects mutations that don't strictly increase it.
 - **Read-only mode sets `keyManager` to null** — check before any write.

@@ -26,7 +26,7 @@ export function IdentityChip({
   return (
     <button
       type="button"
-      className="identity-chip"
+      className={`identity-chip${signedIn ? " identity-chip--signed-in" : ""}`}
       onClick={onClick}
       disabled={disabled}
       title={

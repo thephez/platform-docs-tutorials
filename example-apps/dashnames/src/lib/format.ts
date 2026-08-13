@@ -50,12 +50,12 @@ export function formatCredits(credits: bigint): string {
 }
 
 /**
- * Compact credit amount for tight spots (tile footnotes), e.g. "31.0T".
+ * Compact credit amount for tight spots (tile footnotes), e.g. "31T".
  * Integer math only.
  */
 export function formatCreditsCompact(credits: bigint): string {
   const abs = credits < 0n ? -credits : credits;
-  if (abs < 10_000n) return formatCredits(credits);
+  if (abs < 10_000_000n) return formatCredits(credits);
 
   const units: Array<[bigint, string]> = [
     [1_000_000_000_000_000_000n, "E"],
@@ -71,7 +71,11 @@ export function formatCreditsCompact(credits: bigint): string {
       const whole = tenths / 10n;
       const frac = tenths % 10n;
       const sign = credits < 0n ? "-" : "";
-      return `${sign}${whole.toLocaleString("en-US")}.${frac}${suffix}`;
+      const body =
+        frac === 0n
+          ? whole.toLocaleString("en-US")
+          : `${whole.toLocaleString("en-US")}.${frac}`;
+      return `${sign}${body}${suffix}`;
     }
   }
   return formatCredits(credits);

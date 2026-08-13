@@ -23,7 +23,6 @@ export function MyNamesView({
   identityId,
   balance,
   canWrite,
-  primaryName,
   onManage,
   onTransfer,
   onOpen,
@@ -34,7 +33,6 @@ export function MyNamesView({
   identityId: string | null;
   balance: bigint | null;
   canWrite: boolean;
-  primaryName: string | null;
   onManage: (record: DomainRecord) => void;
   onTransfer: (record: DomainRecord) => void;
   onOpen: (record: DomainRecord) => void;
@@ -105,10 +103,6 @@ export function MyNamesView({
                         parentDomainName={record.parentDomainName}
                       />
                     </button>
-                    {primaryName ===
-                      `${record.label}.${record.parentDomainName}` && (
-                      <span className="badge badge--primary">Primary</span>
-                    )}
                   </div>
                   <div className="portfolio-row__meta">
                     {isListed ? "Listed for sale" : "Not listed"} · rev{" "}
@@ -126,6 +120,7 @@ export function MyNamesView({
                         <Price
                           credits={record.price}
                           align="right"
+                          compactCredits
                           className="portfolio-row__price"
                         />
                         <div className="portfolio-row__state">Listed</div>

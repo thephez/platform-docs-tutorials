@@ -63,6 +63,7 @@ function Shell() {
   const [searchInput, setSearchInput] = useState("");
   const [status, setStatus] = useState("");
   const [now, setNow] = useState(() => Date.now());
+  const settingsReturnView = useRef<View>("discover");
 
   // Modal state
   const [buyTarget, setBuyTarget] = useState<Listing | null>(null);
@@ -117,13 +118,23 @@ function Shell() {
   const canWrite = Boolean(keyManager && identityId && protocol.salesEnabled);
   const canOfferBuy = protocol.salesEnabled;
 
+  const navigateSettings = useCallback((behavior: "open" | "toggle") => {
+    setView((current) => {
+      if (behavior === "toggle" && current === "settings") {
+        return settingsReturnView.current;
+      }
+      if (current !== "settings") settingsReturnView.current = current;
+      return "settings";
+    });
+  }, []);
+
   const openLogin = useCallback(() => {
     if (network !== "testnet") {
-      setView("settings");
+      navigateSettings("open");
       return;
     }
     setLoginOpen(true);
-  }, [network]);
+  }, [network, navigateSettings]);
 
   const requestBuy = useCallback(
     (listing: Listing) => {
@@ -347,8 +358,10 @@ function Shell() {
         balance={balance}
         network={network}
         onNetworkChange={handleNetworkChange}
-        onSettingsClick={() => setView("settings")}
-        onIdentityClick={() => (identityId ? setView("settings") : openLogin())}
+        onSettingsClick={() => navigateSettings("open")}
+        onIdentityClick={() =>
+          identityId ? navigateSettings("toggle") : openLogin()
+        }
       />
 
       <ProtocolGateBanner
@@ -433,7 +446,6 @@ function Shell() {
             identityId={identityId}
             balance={balance}
             canWrite={canWrite}
-            primaryName={identityName}
             onManage={setManageTarget}
             onTransfer={setTransferTarget}
             onOpen={(record) => openDetail(record.documentId)}
