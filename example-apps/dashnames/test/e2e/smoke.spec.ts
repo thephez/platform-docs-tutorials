@@ -193,6 +193,28 @@ test("activity renders the table and event-type filters", async ({ page }) => {
   );
 });
 
+test("identity references open a mobile-safe internal identity page", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 700 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+
+  const identityLink = page
+    .locator(".data-table--activity .identity-link")
+    .first();
+  await expect(identityLink).toBeVisible({ timeout: 20_000 });
+  await identityLink.click();
+
+  await expect(page.getByRole("heading", { name: /^Identity / })).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: /View identity in Explorer/i }),
+  ).toHaveAttribute("target", "_blank");
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(375);
+});
+
 test("the Name column shows names, not raw document IDs", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Activity", exact: true }).click();

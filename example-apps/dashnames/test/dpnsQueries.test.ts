@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  fetchDomainsByIdentity,
   normalizeLabelInput,
   toNormalizedLabel,
 } from "../src/dash/dpnsQueries";
 import type { DashSdk } from "../src/dash/types";
+import type { DocumentHandle } from "../src/lib/safeDoc";
 
 /**
  * Stands in for the SDK's WASM fold. The mappings are the real ones, verified
@@ -19,6 +21,78 @@ function makeSdk() {
     convertToHomographSafe,
   };
 }
+
+function domain(id: string, identityId = "identity-1"): DocumentHandle {
+  return {
+    id,
+    ownerId: identityId,
+    revision: 1n,
+    properties: {
+      label: id,
+      normalizedLabel: id,
+      normalizedParentDomainName: "dash",
+      records: { identity: identityId },
+    },
+  };
+}
+
+describe("fetchDomainsByIdentity", () => {
+  it("returns a single short page", async () => {
+    const query = vi.fn(async () => [domain("one"), domain("two")]);
+    const sdk = { documents: { query } } as unknown as DashSdk;
+
+    const records = await fetchDomainsByIdentity({
+      sdk,
+      identityId: "identity-1",
+    });
+
+    expect(records.map((record) => record.documentId)).toEqual(["one", "two"]);
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it("paginates until it receives a short page", async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([domain("one"), domain("two")])
+      .mockResolvedValueOnce([domain("three")]);
+    const sdk = { documents: { query } } as unknown as DashSdk;
+
+    const records = await fetchDomainsByIdentity({
+      sdk,
+      identityId: "identity-1",
+      pageSize: 2,
+    });
+
+    expect(records.map((record) => record.documentId)).toEqual([
+      "one",
+      "two",
+      "three",
+    ]);
+    expect(query.mock.calls[1]?.[0]).toMatchObject({ startAfter: "two" });
+  });
+
+  it("returns an empty identity result", async () => {
+    const query = vi.fn(async () => []);
+    const sdk = { documents: { query } } as unknown as DashSdk;
+    await expect(
+      fetchDomainsByIdentity({ sdk, identityId: "identity-1" }),
+    ).resolves.toEqual([]);
+  });
+
+  it("stops if Platform repeats a pagination cursor", async () => {
+    const page = [domain("one"), domain("two")];
+    const query = vi.fn(async () => page);
+    const sdk = { documents: { query } } as unknown as DashSdk;
+
+    await fetchDomainsByIdentity({
+      sdk,
+      identityId: "identity-1",
+      pageSize: 2,
+    });
+
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe("normalizeLabelInput", () => {
   it("lowercases and strips the .dash suffix", () => {

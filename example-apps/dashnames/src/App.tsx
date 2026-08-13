@@ -23,6 +23,7 @@ import { useActivity } from "./hooks/useActivity";
 import { useDocumentLabels } from "./hooks/useDocumentLabels";
 import { isStale, useListings } from "./hooks/useListings";
 import { useMyNames } from "./hooks/useMyNames";
+import { useIdentityNames } from "./hooks/useIdentityNames";
 import { useNameSearch } from "./hooks/useNameSearch";
 import { useNameDetail } from "./hooks/useNameDetail";
 import { useSalesStats } from "./hooks/useSalesStats";
@@ -36,6 +37,7 @@ import { BrowseView } from "./components/BrowseView";
 import { BuyModal } from "./components/BuyModal";
 import { DiscoverView } from "./components/DiscoverView";
 import { HowItWorks } from "./components/HowItWorks";
+import { IdentityView } from "./components/IdentityView";
 import { ManageListingModal } from "./components/ManageListingModal";
 import { LoginModal } from "./components/LoginModal";
 import { MyNamesView } from "./components/MyNamesView";
@@ -58,12 +60,14 @@ function Shell() {
 
   const [view, setView] = useState<View>("discover");
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [identityDetailId, setIdentityDetailId] = useState<string | null>(null);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const [searchInput, setSearchInput] = useState("");
   const [status, setStatus] = useState("");
   const [now, setNow] = useState(() => Date.now());
   const settingsReturnView = useRef<View>("discover");
+  const identityReturnView = useRef<View>("discover");
 
   // Modal state
   const [buyTarget, setBuyTarget] = useState<Listing | null>(null);
@@ -96,6 +100,11 @@ function Shell() {
     sdk,
     identityId,
     enabled: Boolean(sdk) && Boolean(identityId),
+  });
+  const identityNames = useIdentityNames({
+    sdk,
+    identityId: identityDetailId,
+    enabled: Boolean(sdk) && view === "identity" && Boolean(identityDetailId),
   });
   const detail = useNameDetail({ sdk, documentId: detailId });
 
@@ -166,6 +175,15 @@ function Shell() {
     setDetailId(documentId);
     setView("detail");
   }, []);
+
+  const openIdentity = useCallback(
+    (targetIdentityId: string) => {
+      if (view !== "identity") identityReturnView.current = view;
+      setIdentityDetailId(targetIdentityId);
+      setView("identity");
+    },
+    [view],
+  );
 
   const handleSearchSubmit = useCallback(async () => {
     const outcome = await search.search(searchInput);
@@ -399,6 +417,7 @@ function Shell() {
             loadingSales={activity.loading}
             onRefresh={refresh}
             lookupName={lookupName}
+            onOpenIdentity={openIdentity}
           />
         )}
 
@@ -437,6 +456,20 @@ function Shell() {
               if (listing) requestBuy(listing);
             }}
             onManage={() => detail.record && setManageTarget(detail.record)}
+            onOpenIdentity={openIdentity}
+          />
+        )}
+
+        {view === "identity" && identityDetailId && (
+          <IdentityView
+            identityId={identityDetailId}
+            names={identityNames.names}
+            loading={identityNames.loading}
+            error={identityNames.error}
+            network={network}
+            onBack={() => setView(identityReturnView.current)}
+            onOpenName={(record) => openDetail(record.documentId)}
+            onOpenIdentity={openIdentity}
           />
         )}
 
@@ -462,6 +495,7 @@ function Shell() {
             onFilterChange={setActivityFilter}
             onOpenDocument={openDetail}
             lookupName={lookupName}
+            onOpenIdentity={openIdentity}
           />
         )}
 

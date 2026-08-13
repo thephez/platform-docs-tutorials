@@ -1,6 +1,6 @@
 # dashnames — a DPNS name marketplace
 
-`dashnames` is a complete, browser-based example of discovering and trading DPNS usernames such as `alice.dash` on Dash Platform. Visitors can search names, browse verified listings, inspect ownership and asking-price history, and review protocol-recorded market activity without signing in. A funded identity can list, reprice, delist, purchase, or permanently transfer a name directly from the browser.
+`dashnames` is a complete, browser-based example of discovering and trading DPNS usernames such as `alice.dash` on Dash Platform. Visitors can search names, browse verified listings, inspect identities and the names resolving to them, inspect ownership and asking-price history, and review protocol-recorded market activity without signing in. A funded identity can list, reprice, delist, purchase, or permanently transfer a name directly from the browser.
 
 The app is both a functional testnet marketplace and a focused Platform tutorial. It shows the parts a production UI cannot safely skip: proof-backed reads, lossless `u64` handling, revision-bound writes, active-protocol gating, identity signing, stale-listing detection immediately before purchase, and recovery of current marketplace state from append-only history.
 

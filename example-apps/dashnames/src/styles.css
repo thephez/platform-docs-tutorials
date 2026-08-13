@@ -115,6 +115,22 @@ a {
   text-underline-offset: 2px;
 }
 
+.identity-link {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--brand-blue-bright);
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.identity-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* focus-visible is a 2px brand outline at 2px offset on every interactive
    element. */
 :focus-visible {
@@ -1692,6 +1708,10 @@ h1 {
 .portfolio-row__name {
   font-size: 14.5px;
   line-height: 1;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
 }
 
 .portfolio-row__meta {
@@ -1728,6 +1748,47 @@ h1 {
   font-weight: 600;
   font-size: 12px;
   color: var(--text-body);
+}
+
+.identity-head {
+  align-items: flex-start;
+}
+
+.identity-head__content {
+  min-width: 0;
+}
+
+.identity-head__back {
+  display: inline-block;
+  margin-bottom: 14px;
+}
+
+.identity-head__id {
+  display: block;
+  max-width: 100%;
+  margin-top: 10px;
+  color: var(--text-body);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.identity-state {
+  padding-top: 0;
+}
+
+.identity-owner {
+  display: flex;
+  min-width: 150px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 7px;
+  font-size: 12px;
+}
+
+.identity-owner__same {
+  color: var(--success-green);
+  font-weight: 600;
 }
 
 .activity-filters {
@@ -2601,6 +2662,11 @@ h1 {
 
   .portfolio-row__value {
     text-align: left;
+  }
+
+  .identity-owner {
+    min-width: 0;
+    align-items: flex-start;
   }
 
   .data-table--activity,

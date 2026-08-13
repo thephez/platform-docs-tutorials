@@ -25,6 +25,7 @@ import { DpnsName } from "./DpnsName";
 import { Timeline } from "./Timeline";
 import { SkeletonRows } from "./Skeleton";
 import { ExplorerId } from "./ExplorerId";
+import { IdentityLink } from "./IdentityLink";
 
 export function NameDetailView({
   record,
@@ -38,6 +39,7 @@ export function NameDetailView({
   onBack,
   onBuy,
   onManage,
+  onOpenIdentity,
 }: {
   record: DomainRecord | null;
   network: Network;
@@ -50,6 +52,7 @@ export function NameDetailView({
   onBack: () => void;
   onBuy: () => void;
   onManage: () => void;
+  onOpenIdentity: (identityId: string) => void;
 }) {
   const [tab, setTab] = useState<"ownership" | "priceHistory">("ownership");
 
@@ -121,19 +124,17 @@ export function NameDetailView({
           <div className="fact-strip">
             <div className="fact-cell">
               <span className="label-caps">Current owner</span>
-              <ExplorerId
-                network={network}
-                kind="identity"
+              <IdentityLink
                 id={record.ownerId}
+                onOpen={onOpenIdentity}
                 className="fact-cell__value mono"
               />
             </div>
             <div className="fact-cell">
               <span className="label-caps">Resolves to</span>
-              <ExplorerId
-                network={network}
-                kind="identity"
+              <IdentityLink
                 id={record.resolvesTo}
+                onOpen={onOpenIdentity}
                 className="fact-cell__value mono"
               />
             </div>
@@ -165,11 +166,11 @@ export function NameDetailView({
           </div>
 
           {tab === "ownership" ? (
-            <Timeline events={ownership} network={network} />
+            <Timeline events={ownership} onOpenIdentity={onOpenIdentity} />
           ) : (
             <Timeline
               events={priceHistory}
-              network={network}
+              onOpenIdentity={onOpenIdentity}
               showRegistrationNote={false}
             />
           )}
@@ -242,10 +243,9 @@ export function NameDetailView({
               <span className="label-caps">Not for sale</span>
               <p className="modal__sub">
                 This name is registered and held by{" "}
-                <ExplorerId
-                  network={network}
-                  kind="identity"
+                <IdentityLink
                   id={record.ownerId}
+                  onOpen={onOpenIdentity}
                   className="mono"
                 />
                 . It has no asking price, so it cannot be bought here.

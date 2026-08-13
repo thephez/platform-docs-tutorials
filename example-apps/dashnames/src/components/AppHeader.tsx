@@ -12,6 +12,7 @@ export type View =
   | "discover"
   | "browse"
   | "detail"
+  | "identity"
   /** The portfolio — also where listing a name starts. */
   | "my-names"
   | "activity"

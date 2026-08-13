@@ -6,9 +6,8 @@
  * transfer/registration `#4a637d`.
  */
 import { activityKind, type HistoryEvent } from "../dash/listingTypes";
-import type { Network } from "../dash/contracts";
 import { formatBlock, formatDash, relativeTime } from "../lib/format";
-import { ExplorerId } from "./ExplorerId";
+import { IdentityLink } from "./IdentityLink";
 
 function dotColor(event: HistoryEvent): string {
   switch (activityKind(event)) {
@@ -35,41 +34,47 @@ function title(event: HistoryEvent): string {
   return "Transferred";
 }
 
-function Detail({ event, network }: { event: HistoryEvent; network: Network }) {
+function Detail({
+  event,
+  onOpenIdentity,
+}: {
+  event: HistoryEvent;
+  onOpenIdentity: (identityId: string) => void;
+}) {
   const kind = activityKind(event);
   if (kind === "SALE") {
     return (
       <>
-        <ExplorerId network={network} kind="identity" id={event.sellerId} /> →{" "}
-        <ExplorerId network={network} kind="identity" id={event.ownerId} /> ·
-        purchase record
+        <IdentityLink id={event.sellerId} onOpen={onOpenIdentity} /> →{" "}
+        <IdentityLink id={event.ownerId} onOpen={onOpenIdentity} /> · purchase
+        record
       </>
     );
   }
   if (kind === "TRANSFER") {
     return (
       <>
-        <ExplorerId network={network} kind="identity" id={event.ownerId} /> →{" "}
-        <ExplorerId network={network} kind="identity" id={event.toIdentityId} />
-        · listing cleared by transfer
+        <IdentityLink id={event.ownerId} onOpen={onOpenIdentity} /> →{" "}
+        <IdentityLink id={event.toIdentityId} onOpen={onOpenIdentity} />·
+        listing cleared by transfer
       </>
     );
   }
   return (
     <>
       Price update by{" "}
-      <ExplorerId network={network} kind="identity" id={event.ownerId} />
+      <IdentityLink id={event.ownerId} onOpen={onOpenIdentity} />
     </>
   );
 }
 
 export function Timeline({
   events,
-  network,
+  onOpenIdentity,
   showRegistrationNote = true,
 }: {
   events: HistoryEvent[];
-  network: Network;
+  onOpenIdentity: (identityId: string) => void;
   showRegistrationNote?: boolean;
 }) {
   if (events.length === 0 && !showRegistrationNote) {
@@ -99,7 +104,7 @@ export function Timeline({
                 </span>
               </div>
               <div className="timeline-entry__detail">
-                <Detail event={event} network={network} />
+                <Detail event={event} onOpenIdentity={onOpenIdentity} />
               </div>
             </div>
           </div>

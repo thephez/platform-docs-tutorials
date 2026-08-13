@@ -261,29 +261,47 @@ export async function searchDomainsByPrefix({
 export async function fetchDomainsByIdentity({
   sdk,
   identityId,
-  limit = MAX_QUERY_LIMIT,
+  pageSize = MAX_QUERY_LIMIT,
   signal,
 }: {
   sdk: DashSdk;
   identityId: string;
-  limit?: number;
+  pageSize?: number;
   signal?: AbortSignal;
 }): Promise<DomainRecord[]> {
-  signal?.throwIfAborted();
+  const limit = Math.max(1, Math.min(pageSize, MAX_QUERY_LIMIT));
+  const records: DomainRecord[] = [];
+  const seenCursors = new Set<string>();
+  let startAfter: string | undefined;
 
-  const results = await sdk.documents.query({
-    dataContractId: DPNS_CONTRACT_ID,
-    documentTypeName: DOMAIN_DOCUMENT_TYPE,
-    where: [["records.identity", "==", identityId]],
-    orderBy: [["records.identity", "asc"]],
-    limit: Math.min(limit, MAX_QUERY_LIMIT),
-  });
+  while (true) {
+    signal?.throwIfAborted();
+    const results = await sdk.documents.query({
+      dataContractId: DPNS_CONTRACT_ID,
+      documentTypeName: DOMAIN_DOCUMENT_TYPE,
+      where: [["records.identity", "==", identityId]],
+      orderBy: [["records.identity", "asc"]],
+      limit,
+      ...(startAfter ? { startAfter } : {}),
+    });
+    signal?.throwIfAborted();
 
-  signal?.throwIfAborted();
+    const documents = toDocumentArray(results);
+    records.push(
+      ...documents
+        .map(toDomainRecord)
+        .filter((record): record is DomainRecord => record != null),
+    );
 
-  return toDocumentArray(results)
-    .map(toDomainRecord)
-    .filter((r): r is DomainRecord => r != null);
+    if (documents.length < limit) break;
+    const lastDocument = documents.at(-1);
+    const cursor = lastDocument ? docId(lastDocument) : null;
+    if (!cursor || seenCursors.has(cursor)) break;
+    seenCursors.add(cursor);
+    startAfter = cursor;
+  }
+
+  return records;
 }
 
 /**

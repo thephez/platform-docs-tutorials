@@ -17,12 +17,13 @@ import type { SyncPhase } from "../hooks/useListings";
 import type { SyncProgress } from "../dash/listingsIndex";
 import type { SearchOutcome } from "../hooks/useNameSearch";
 import type { NameLabel } from "../hooks/useDocumentLabels";
-import { formatDash, relativeTime, shortId } from "../lib/format";
+import { formatDash, relativeTime } from "../lib/format";
 import { NameCell } from "./NameCell";
 import { NameTile } from "./NameTile";
 import { Price } from "./Price";
 import { SkeletonGrid, SkeletonRows } from "./Skeleton";
 import { SyncChip } from "./SyncChip";
+import { IdentityLink } from "./IdentityLink";
 
 export function DiscoverView({
   listings,
@@ -48,6 +49,7 @@ export function DiscoverView({
   loadingSales,
   onRefresh,
   lookupName,
+  onOpenIdentity,
 }: {
   listings: Listing[];
   sales: HistoryEvent[];
@@ -73,6 +75,7 @@ export function DiscoverView({
   onRefresh: () => void;
   /** Resolves a sale record's documentId to its DPNS label. */
   lookupName: (documentId: string) => NameLabel | null;
+  onOpenIdentity: (identityId: string) => void;
 }) {
   // Newest first — `seenAt` is when the index last confirmed the listing.
   const recent = [...listings].sort((a, b) => b.seenAt - a.seenAt).slice(0, 4);
@@ -289,9 +292,11 @@ export function DiscoverView({
                       <span className="amount-dash">—</span>
                     )}
                   </span>
-                  <span className="data-table__cell-mono">
-                    {shortId(sale.ownerId)}
-                  </span>
+                  <IdentityLink
+                    id={sale.ownerId}
+                    onOpen={onOpenIdentity}
+                    className="data-table__cell-mono"
+                  />
                   <span className="data-table__cell-meta align-right">
                     {relativeTime(sale.createdAt)}
                   </span>

@@ -10,7 +10,8 @@ import {
   type HistoryEvent,
 } from "../dash/listingTypes";
 import type { NameLabel } from "../hooks/useDocumentLabels";
-import { formatBlock, shortId } from "../lib/format";
+import { formatBlock } from "../lib/format";
+import { IdentityLink } from "./IdentityLink";
 import { NameCell } from "./NameCell";
 import { Price } from "./Price";
 import { SkeletonRows } from "./Skeleton";
@@ -53,6 +54,7 @@ export function ActivityView({
   onFilterChange,
   onOpenDocument,
   lookupName,
+  onOpenIdentity,
 }: {
   events: HistoryEvent[];
   loading: boolean;
@@ -61,6 +63,7 @@ export function ActivityView({
   onOpenDocument: (documentId: string) => void;
   /** Resolves a record's documentId to its DPNS label. */
   lookupName: (documentId: string) => NameLabel | null;
+  onOpenIdentity: (identityId: string) => void;
 }) {
   const visible = events.filter((e) => matchesFilter(activityKind(e), filter));
 
@@ -114,12 +117,10 @@ export function ActivityView({
               const showAmount =
                 (kind === "SALE" || kind === "LISTED") && event.price != null;
               return (
-                <button
+                <div
                   key={event.id}
-                  type="button"
-                  className="data-table__row data-table__row--clickable"
+                  className="data-table__row"
                   style={{ gridTemplateColumns: COLUMNS }}
-                  onClick={() => onOpenDocument(event.documentId)}
                 >
                   <span>
                     <span className={BADGE_CLASS[kind]}>{kind}</span>
@@ -127,6 +128,7 @@ export function ActivityView({
                   <NameCell
                     documentId={event.documentId}
                     name={lookupName(event.documentId)}
+                    onClick={() => onOpenDocument(event.documentId)}
                   />
                   <span className="align-right">
                     {showAmount && event.price != null ? (
@@ -140,16 +142,41 @@ export function ActivityView({
                     )}
                   </span>
                   <span className="data-table__cell-mono">
-                    {kind === "SALE"
-                      ? `${shortId(event.sellerId)} → ${shortId(event.ownerId)}`
-                      : kind === "TRANSFER"
-                        ? `${shortId(event.ownerId)} → ${shortId(event.toIdentityId)}`
-                        : shortId(event.ownerId)}
+                    {kind === "SALE" ? (
+                      <>
+                        <IdentityLink
+                          id={event.sellerId}
+                          onOpen={onOpenIdentity}
+                        />{" "}
+                        →{" "}
+                        <IdentityLink
+                          id={event.ownerId}
+                          onOpen={onOpenIdentity}
+                        />
+                      </>
+                    ) : kind === "TRANSFER" ? (
+                      <>
+                        <IdentityLink
+                          id={event.ownerId}
+                          onOpen={onOpenIdentity}
+                        />{" "}
+                        →{" "}
+                        <IdentityLink
+                          id={event.toIdentityId}
+                          onOpen={onOpenIdentity}
+                        />
+                      </>
+                    ) : (
+                      <IdentityLink
+                        id={event.ownerId}
+                        onOpen={onOpenIdentity}
+                      />
+                    )}
                   </span>
                   <span className="data-table__cell-meta align-right">
                     {formatBlock(event.createdAtBlockHeight)}
                   </span>
-                </button>
+                </div>
               );
             })
           )}
