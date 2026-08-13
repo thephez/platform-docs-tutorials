@@ -19,13 +19,16 @@ test("discover renders the hero, market summary, and footer", async ({
 
   await expect(page.locator(".wordmark")).toHaveText("dashnames");
   await expect(
-    page.getByRole("heading", { name: /Your name, on Dash/i }),
+    page.getByRole("button", { name: "Discover", exact: true }),
+  ).toHaveAttribute("aria-current", "page");
+  await expect(
+    page.getByRole("heading", { name: /Buy and sell .dash names, on-chain/i }),
   ).toBeVisible();
 
-  // The summary contains market figures only; sync state belongs to listings.
+  // The compact hero card contains market figures only.
   await expect(page.locator(".market-stat")).toHaveCount(3);
-  await expect(page.locator(".market-stats .label-caps").first()).toHaveText(
-    /names for sale/i,
+  await expect(page.locator(".market-card .label-caps")).toHaveText(
+    /market · 30 days/i,
   );
 
   await expect(page.getByRole("link", { name: "View source" })).toHaveAttribute(
@@ -36,7 +39,7 @@ test("discover renders the hero, market summary, and footer", async ({
 
 test("the sync chip reports a real index state", async ({ page }) => {
   await page.goto("/");
-  const chip = page.locator(".section__head .sync-chip").first();
+  const chip = page.locator(".discover-index .sync-chip").first();
   await expect(chip).toBeVisible();
   // Any of the designed states is acceptable; a blank chip is not.
   await expect(chip).toHaveText(/SYNCED|SYNCING|NOT SYNCED|LAST SYNCED|FAILED/);
@@ -94,8 +97,35 @@ test("the header stays horizontally fixed between views", async ({ page }) => {
   for (const view of ["Browse", "My names", "Activity", "Discover"]) {
     await page.getByRole("button", { name: view, exact: true }).click();
     await expect(wordmark).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: view, exact: true }),
+    ).toHaveAttribute("aria-current", "page");
     expect((await wordmark.boundingBox())?.x).toBe(initialX);
   }
+});
+
+test("name search stays available in the header on every view", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  for (const view of ["Discover", "Browse", "My names", "Activity"]) {
+    await page.getByRole("button", { name: view, exact: true }).click();
+    await expect(page.getByLabel("Search any name")).toBeVisible();
+  }
+});
+
+test("slash focuses header search without hijacking typing", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const search = page.getByLabel("Search any name");
+
+  await page.keyboard.press("/");
+  await expect(search).toBeFocused();
+
+  await page.keyboard.type("alice/dash");
+  await expect(search).toHaveValue("alice/dash");
 });
 
 test("the narrow header and login sheet stay inside the viewport", async ({
@@ -109,6 +139,11 @@ test("the narrow header and login sheet stay inside the viewport", async ({
       page.getByRole("button", { name: view, exact: true }),
     ).toBeVisible();
   }
+  await expect(page.getByLabel("Search any name")).toBeHidden();
+  await expect(page.locator(".hero__sub")).toBeHidden();
+  const heroBox = await page.locator(".hero").boundingBox();
+  expect(heroBox).not.toBeNull();
+  expect(heroBox!.height).toBeLessThan(340);
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBeLessThanOrEqual(375);

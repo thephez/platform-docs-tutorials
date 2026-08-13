@@ -18,8 +18,9 @@ describe("IdentityChip", () => {
     );
 
     const chip = screen.getByRole("button", {
-      name: /stoppable-baguette3\.dash/i,
+      name: /stoppable-baguette3/i,
     });
+    expect(screen.queryByText(/\.dash/i)).toBeNull();
     expect(screen.getByText("1.000 Ð")).toBeTruthy();
     expect(chip.className).toContain("identity-chip--signed-in");
     fireEvent.click(chip);

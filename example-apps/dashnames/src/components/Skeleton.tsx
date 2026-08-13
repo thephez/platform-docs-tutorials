@@ -7,7 +7,7 @@ export function SkeletonGrid({
   columns,
 }: {
   count: number;
-  columns: 5 | 6;
+  columns: 4 | 5 | 6;
 }) {
   return (
     <div className={`name-grid name-grid--${columns}`} aria-hidden="true">

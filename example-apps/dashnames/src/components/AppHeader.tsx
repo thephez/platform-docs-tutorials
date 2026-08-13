@@ -1,11 +1,10 @@
 /**
- * Header: 60px, wordmark + nav left, optional 280px
- * search + identity chip right.
+ * Header: 60px, wordmark + nav left, persistent search + identity chip right.
  *
  * There is NO wallet-connect modal — the signed-in identity and its live credit
  * balance live permanently here, and every signing step names the identity.
  */
-import type { FormEvent } from "react";
+import { useEffect, useRef, type FormEvent } from "react";
 import type { Network } from "../dash/contracts";
 import { IdentityChip } from "./IdentityChip";
 
@@ -67,6 +66,39 @@ export function AppHeader({
   onSettingsClick: () => void;
   onIdentityClick: () => void;
 }) {
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!showSearch) return;
+
+    function focusSearch(event: KeyboardEvent) {
+      if (
+        event.key !== "/" ||
+        event.defaultPrevented ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey
+      ) {
+        return;
+      }
+
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.matches("input, textarea, select, [role='textbox']"))
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      searchInputRef.current?.focus();
+    }
+
+    window.addEventListener("keydown", focusSearch);
+    return () => window.removeEventListener("keydown", focusSearch);
+  }, [showSearch]);
+
   // A name-detail page is reached from the grid, so it keeps Browse lit.
   const activeFor = (item: View) =>
     item === view || (item === "browse" && view === "detail");
@@ -93,6 +125,7 @@ export function AppHeader({
               type="button"
               className={`app-nav__item${activeFor(item.view) ? " app-nav__item--active" : ""}`}
               onClick={() => onNavigate(item.view)}
+              aria-current={activeFor(item.view) ? "page" : undefined}
             >
               {item.label}
             </button>
@@ -103,17 +136,23 @@ export function AppHeader({
       <div className="app-header__right">
         {showSearch && (
           <form className="header-search" onSubmit={handleSubmit}>
-            <span className="header-search__glyph" aria-hidden="true">
+            <button
+              type="submit"
+              className="header-search__glyph"
+              aria-label="Submit name search"
+            >
               ⌕
-            </span>
+            </button>
             <input
+              ref={searchInputRef}
               className="header-search__input"
               type="search"
-              placeholder="Search names"
-              aria-label="Search names"
+              placeholder="Search any name"
+              aria-label="Search any name"
               value={searchValue ?? ""}
               onChange={(e) => onSearchChange?.(e.target.value)}
             />
+            <kbd className="header-search__shortcut">/</kbd>
           </form>
         )}
         <select

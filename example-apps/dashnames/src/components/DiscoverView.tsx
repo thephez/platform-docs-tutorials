@@ -41,6 +41,8 @@ export function DiscoverView({
   onBuy,
   onManage,
   onSeeAll,
+  onOpenMyNames,
+  onOpenHow,
   canBuy,
   buyerIdentityId,
   loadingSales,
@@ -63,6 +65,8 @@ export function DiscoverView({
   onBuy: (listing: Listing) => void;
   onManage: (listing: Listing) => void;
   onSeeAll: () => void;
+  onOpenMyNames: () => void;
+  onOpenHow: () => void;
   canBuy: boolean;
   buyerIdentityId: string | null;
   loadingSales: boolean;
@@ -71,7 +75,7 @@ export function DiscoverView({
   lookupName: (documentId: string) => NameLabel | null;
 }) {
   // Newest first — `seenAt` is when the index last confirmed the listing.
-  const recent = [...listings].sort((a, b) => b.seenAt - a.seenAt).slice(0, 6);
+  const recent = [...listings].sort((a, b) => b.seenAt - a.seenAt).slice(0, 4);
   // Cheapest short names stand in for "popular": real listings, no invented data.
   const popular = [...listings]
     .filter((l) => l.normalizedLabel.length <= 5)
@@ -91,9 +95,9 @@ export function DiscoverView({
         <div className="hero__glow-b" aria-hidden="true" />
         <div className="hero__inner">
           <h1 className="hero__headline">
-            Your name, on Dash.
+            Buy and sell <span>.dash</span>
             <br />
-            Owned, transferable, and now for sale.
+            names, on-chain.
           </h1>
           <p className="hero__sub">
             A DPNS name resolves payments and identity the way DNS resolves a
@@ -145,62 +149,60 @@ export function DiscoverView({
             </div>
           )}
         </div>
-      </section>
 
-      <section className="market-stats" aria-label="Market statistics">
-        <div className="market-stat">
-          <span className="label-caps">Names for sale</span>
-          <span className="market-stat__value">
-            {syncing && listings.length === 0
-              ? "—"
-              : listings.length.toLocaleString("en-US")}
-          </span>
-        </div>
-        <div className="market-stat">
-          <span className="label-caps">Sold in 30 days</span>
-          {salesStats.count == null ? (
-            <span className="market-stat__empty">
-              {salesStats.unavailable
-                ? "Not available on this network"
-                : "No sales recorded yet"}
-            </span>
-          ) : (
-            <span className="market-stat__value">
-              {salesStats.count.toLocaleString("en-US")}
-            </span>
-          )}
-        </div>
-        <div className="market-stat">
-          <span className="label-caps">30d volume</span>
-          {salesStats.volumeCredits == null ? (
-            <span className="market-stat__empty">
-              {salesStats.unavailable
-                ? "Not available on this network"
-                : "No sales recorded yet"}
-            </span>
-          ) : (
-            <span className="market-stat__value">
-              {formatDash(salesStats.volumeCredits, {
-                minDecimals: 0,
-                maxDecimals: 3,
-              })}{" "}
-              <span className="market-stat__unit">DASH</span>
-            </span>
-          )}
-        </div>
+        <aside className="market-card" aria-label="Market statistics">
+          <div className="market-card__head">
+            <span className="label-caps">Market · 30 days</span>
+          </div>
+          <div className="market-stats">
+            <div className="market-stat">
+              <span className="market-stat__value">
+                {syncing && listings.length === 0
+                  ? "—"
+                  : listings.length.toLocaleString("en-US")}
+              </span>
+              <span className="market-stat__label">for sale</span>
+            </div>
+            <div className="market-stat">
+              {salesStats.count == null ? (
+                <span className="market-stat__empty">
+                  {salesStats.unavailable
+                    ? "Not available on this network"
+                    : "No sales recorded yet"}
+                </span>
+              ) : (
+                <span className="market-stat__value">
+                  {salesStats.count.toLocaleString("en-US")}
+                </span>
+              )}
+              <span className="market-stat__label">sold</span>
+            </div>
+            <div className="market-stat">
+              {salesStats.volumeCredits == null ? (
+                <span className="market-stat__empty">
+                  {salesStats.unavailable
+                    ? "Not available on this network"
+                    : "No sales recorded yet"}
+                </span>
+              ) : (
+                <span className="market-stat__value">
+                  {formatDash(salesStats.volumeCredits, {
+                    minDecimals: 0,
+                    maxDecimals: 3,
+                  })}{" "}
+                  <span className="market-stat__unit">DASH</span>
+                </span>
+              )}
+              <span className="market-stat__label">DASH volume</span>
+            </div>
+          </div>
+        </aside>
       </section>
 
       <section className="section">
         <div className="section__head">
           <h2 className="section__title">Recently listed</h2>
           <div className="section__actions">
-            <SyncChip
-              phase={syncPhase}
-              progress={syncProgress}
-              lastSyncedAt={lastSyncedAt}
-              stale={stale}
-              onRefresh={onRefresh}
-            />
             {listings.length > 0 && (
               <button
                 type="button"
@@ -214,7 +216,7 @@ export function DiscoverView({
         </div>
 
         {syncing && listings.length === 0 ? (
-          <SkeletonGrid count={6} columns={6} />
+          <SkeletonGrid count={4} columns={4} />
         ) : recent.length === 0 ? (
           <div className="data-table">
             <p className="empty-state">
@@ -223,7 +225,7 @@ export function DiscoverView({
             </p>
           </div>
         ) : (
-          <div className="name-grid name-grid--6">
+          <div className="name-grid name-grid--4">
             {recent.map((listing) => (
               <NameTile
                 key={listing.documentId}
@@ -239,58 +241,110 @@ export function DiscoverView({
         )}
       </section>
 
-      <section className="section">
-        <div className="section__head">
-          <h2 className="section__title">Recent sales</h2>
-          <span className="section__note">From protocol purchase records</span>
-        </div>
-        <div className="data-table data-table--sales">
-          <div
-            className="data-table__row data-table__row--head"
-            style={{ gridTemplateColumns: "1.4fr 1fr 1fr .8fr" }}
-          >
-            <span className="label-caps">Name</span>
-            <span className="label-caps align-right">Sale price</span>
-            <span className="label-caps">Buyer</span>
-            <span className="label-caps align-right">When</span>
+      <div className="discover-lower">
+        <section className="section discover-lower__sales">
+          <div className="section__head">
+            <h2 className="section__title">Recent sales</h2>
+            <span className="section__note">
+              From protocol purchase records
+            </span>
           </div>
+          <div className="data-table data-table--sales">
+            <div
+              className="data-table__row data-table__row--head"
+              style={{ gridTemplateColumns: "1.4fr 1fr 1fr .8fr" }}
+            >
+              <span className="label-caps">Name</span>
+              <span className="label-caps align-right">Sale price</span>
+              <span className="label-caps">Buyer</span>
+              <span className="label-caps align-right">When</span>
+            </div>
 
-          {loadingSales ? (
-            <SkeletonRows count={3} />
-          ) : sales.length === 0 ? (
-            <p className="empty-state">
-              No sales recorded yet. Purchase history starts at protocol v13.
+            {loadingSales ? (
+              <SkeletonRows count={3} />
+            ) : sales.length === 0 ? (
+              <p className="empty-state">
+                No sales recorded yet. Purchase history starts at protocol v13.
+              </p>
+            ) : (
+              sales.slice(0, 5).map((sale) => (
+                <div
+                  key={sale.id}
+                  className="data-table__row"
+                  style={{ gridTemplateColumns: "1.4fr 1fr 1fr .8fr" }}
+                >
+                  <NameCell
+                    documentId={sale.documentId}
+                    name={lookupName(sale.documentId)}
+                    onClick={() => onOpenDocument(sale.documentId)}
+                  />
+                  <span className="align-right">
+                    {sale.price != null ? (
+                      <Price
+                        credits={sale.price}
+                        align="right"
+                        compactCredits
+                      />
+                    ) : (
+                      <span className="amount-dash">—</span>
+                    )}
+                  </span>
+                  <span className="data-table__cell-mono">
+                    {shortId(sale.ownerId)}
+                  </span>
+                  <span className="data-table__cell-meta align-right">
+                    {relativeTime(sale.createdAt)}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+
+        <aside className="discover-index">
+          <div className="discover-index__eyebrow">
+            Index state · same slot, all views
+          </div>
+          <div className="index-panel">
+            <SyncChip
+              phase={syncPhase}
+              progress={syncProgress}
+              lastSyncedAt={lastSyncedAt}
+              stale={stale}
+              onRefresh={onRefresh}
+            />
+            <p>
+              Names are indexed locally from DPNS price-update history and
+              revalidated against current Platform state.
             </p>
-          ) : (
-            sales.slice(0, 5).map((sale) => (
-              <div
-                key={sale.id}
-                className="data-table__row"
-                style={{ gridTemplateColumns: "1.4fr 1fr 1fr .8fr" }}
-              >
-                <NameCell
-                  documentId={sale.documentId}
-                  name={lookupName(sale.documentId)}
-                  onClick={() => onOpenDocument(sale.documentId)}
-                />
-                <span className="align-right">
-                  {sale.price != null ? (
-                    <Price credits={sale.price} align="right" compactCredits />
-                  ) : (
-                    <span className="amount-dash">—</span>
-                  )}
-                </span>
-                <span className="data-table__cell-mono">
-                  {shortId(sale.ownerId)}
-                </span>
-                <span className="data-table__cell-meta align-right">
-                  {relativeTime(sale.createdAt)}
-                </span>
+          </div>
+          {recent.length === 0 && !syncing && (
+            <div className="market-empty">
+              <h3>Nothing for sale yet</h3>
+              <p>
+                No owner on this network has set an asking price. Names still
+                resolve, and you can look any of them up.
+              </p>
+              <div className="market-empty__actions">
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={onOpenMyNames}
+                >
+                  List one of my names
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  onClick={onOpenHow}
+                >
+                  How indexing works
+                </button>
               </div>
-            ))
+            </div>
           )}
-        </div>
-      </section>
+        </aside>
+      </div>
     </>
   );
 }

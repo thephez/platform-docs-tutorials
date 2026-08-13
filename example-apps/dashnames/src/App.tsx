@@ -349,7 +349,7 @@ function Shell() {
       <AppHeader
         view={view}
         onNavigate={setView}
-        showSearch={view === "browse" || view === "detail"}
+        showSearch
         searchValue={searchInput}
         onSearchChange={setSearchInput}
         onSearchSubmit={handleSearchSubmit}
@@ -392,6 +392,8 @@ function Shell() {
             onBuy={requestBuy}
             onManage={setManageTarget}
             onSeeAll={() => setView("browse")}
+            onOpenMyNames={() => setView("my-names")}
+            onOpenHow={() => setView("how")}
             canBuy={canOfferBuy}
             buyerIdentityId={identityId}
             loadingSales={activity.loading}

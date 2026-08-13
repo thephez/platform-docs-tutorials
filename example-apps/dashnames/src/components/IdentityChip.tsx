@@ -1,6 +1,7 @@
 /**
- * Identity chip: 32px pill carrying the signed-in name
- * and live credit balance, plus a 28px gradient avatar.
+ * Identity chip: signed-in name stacked above the live credit balance,
+ * with a gradient avatar on the right. DPNS's `.dash` suffix is omitted in
+ * this compact account context.
  *
  * Balance renders as a DASH figure with the Ð sign, matching the design's
  * "18.402 Ð".
@@ -22,6 +23,7 @@ export function IdentityChip({
 }) {
   const signedIn = Boolean(identityId);
   const label = signedIn ? (name ?? shortId(identityId)) : "Sign in";
+  const displayLabel = label.replace(/\.dash$/i, "");
 
   return (
     <button
@@ -37,12 +39,14 @@ export function IdentityChip({
             : "Sign in with a recovery phrase or authentication WIF"
       }
     >
-      <span className="identity-chip__name">{label}</span>
-      {signedIn && balance != null && (
-        <span className="identity-chip__balance">
-          {formatDash(balance, { minDecimals: 3, maxDecimals: 3 })} Ð
-        </span>
-      )}
+      <span className="identity-chip__text">
+        <span className="identity-chip__name">{displayLabel}</span>
+        {signedIn && balance != null && (
+          <span className="identity-chip__balance">
+            {formatDash(balance, { minDecimals: 3, maxDecimals: 3 })} Ð
+          </span>
+        )}
+      </span>
       <span className="avatar" aria-hidden="true" />
     </button>
   );
