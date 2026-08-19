@@ -1,6 +1,6 @@
 /**
- * Provenance timeline: rail of dots + connectors, one entry per
- * protocol event.
+ * Provenance timeline: compact rows with one color-coded dot per protocol
+ * event and date/block metadata right-aligned for scanning.
  *
  * Dot colors: listed/price-update `#35b0ff`, sale `#3ddb95`,
  * transfer/registration `#4a637d`.
@@ -83,8 +83,7 @@ export function Timeline({
 
   return (
     <div className="timeline">
-      {events.map((event, index) => {
-        const isLast = index === events.length - 1 && !showRegistrationNote;
+      {events.map((event) => {
         return (
           <div key={event.id} className="timeline-entry">
             <div className="timeline-entry__rail">
@@ -92,21 +91,21 @@ export function Timeline({
                 className="timeline-entry__dot"
                 style={{ background: dotColor(event) }}
               />
-              {!isLast && <span className="timeline-entry__connector" />}
             </div>
-            <div>
+            <div className="timeline-entry__content">
               <div className="timeline-entry__head">
                 <span className="timeline-entry__title">{title(event)}</span>
-                <span className="timeline-entry__when">
-                  {relativeTime(event.createdAt)}
-                  {event.createdAtBlockHeight != null &&
-                    ` · block ${formatBlock(event.createdAtBlockHeight)}`}
-                </span>
               </div>
               <div className="timeline-entry__detail">
                 <Detail event={event} onOpenIdentity={onOpenIdentity} />
               </div>
             </div>
+            <span className="timeline-entry__when">
+              <span>{relativeTime(event.createdAt)}</span>
+              {event.createdAtBlockHeight != null && (
+                <span>block {formatBlock(event.createdAtBlockHeight)}</span>
+              )}
+            </span>
           </div>
         );
       })}
@@ -121,7 +120,7 @@ export function Timeline({
               style={{ background: "var(--timeline-dot-neutral)" }}
             />
           </div>
-          <div>
+          <div className="timeline-entry__content">
             <div className="timeline-entry__head">
               <span className="timeline-entry__title">Registered</span>
             </div>
@@ -129,6 +128,10 @@ export function Timeline({
               pre-v13 history is not recorded on-chain
             </div>
           </div>
+          <span className="timeline-entry__when">
+            <span>before v13</span>
+            <span>not on chain</span>
+          </span>
         </div>
       )}
     </div>

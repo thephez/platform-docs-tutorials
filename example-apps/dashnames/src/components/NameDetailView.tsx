@@ -36,6 +36,9 @@ export function NameDetailView({
   balance,
   isOwner,
   canWrite,
+  backLabel,
+  resultPosition,
+  resultCount,
   onBack,
   onBuy,
   onManage,
@@ -49,12 +52,16 @@ export function NameDetailView({
   balance: bigint | null;
   isOwner: boolean;
   canWrite: boolean;
+  backLabel: string;
+  resultPosition: number | null;
+  resultCount: number | null;
   onBack: () => void;
   onBuy: () => void;
   onManage: () => void;
   onOpenIdentity: (identityId: string) => void;
 }) {
   const [tab, setTab] = useState<"ownership" | "priceHistory">("ownership");
+  const [copied, setCopied] = useState(false);
 
   if (loading && !record) {
     return (
@@ -83,19 +90,32 @@ export function NameDetailView({
   const lastSale = ownership.find((e) => e.type === "purchase");
   const affordable =
     record.price != null && balance != null ? balance >= record.price : null;
+  const shortfall =
+    record.price != null && balance != null && balance < record.price
+      ? record.price - balance
+      : null;
+  const documentId = record.documentId;
+
+  async function copyDocumentId() {
+    if (!navigator.clipboard) return;
+    await navigator.clipboard.writeText(documentId);
+    setCopied(true);
+  }
 
   return (
     <>
       <div className="breadcrumb">
         <button type="button" className="breadcrumb__link" onClick={onBack}>
-          Discover
+          ← Back to {backLabel}
         </button>
-        <span className="breadcrumb__sep">/</span>
-        <span className="breadcrumb__link">Names</span>
-        <span className="breadcrumb__sep">/</span>
-        <span className="breadcrumb__current">
-          {record.label}.{record.parentDomainName}
-        </span>
+        {resultPosition != null && resultCount != null && (
+          <>
+            <span className="breadcrumb__sep">·</span>
+            <span className="breadcrumb__current">
+              {resultPosition} of {resultCount} results
+            </span>
+          </>
+        )}
       </div>
 
       <div className="detail">
@@ -108,14 +128,25 @@ export function NameDetailView({
           </h1>
           <div className="detail__badges">
             {forSale && <span className="badge badge--sale">For sale</span>}
-            <ExplorerId
-              network={network}
-              kind="document"
-              id={record.documentId}
-              className="badge badge--meta"
-            >
-              doc {shortId(record.documentId)}
-            </ExplorerId>
+            <span className="badge badge--meta detail-doc">
+              <ExplorerId
+                network={network}
+                kind="document"
+                id={record.documentId}
+                className="detail-doc__link"
+              >
+                doc {shortId(record.documentId)}
+              </ExplorerId>
+              <button
+                type="button"
+                className="detail-doc__copy"
+                aria-label="Copy document ID"
+                title={copied ? "Copied" : "Copy document ID"}
+                onClick={() => void copyDocumentId()}
+              >
+                {copied ? "✓" : "⧉"}
+              </button>
+            </span>
             <span className="badge badge--meta">
               rev {String(record.revision)}
             </span>
@@ -123,7 +154,7 @@ export function NameDetailView({
 
           <div className="fact-strip">
             <div className="fact-cell">
-              <span className="label-caps">Current owner</span>
+              <span className="label-caps">Owner</span>
               <IdentityLink
                 id={record.ownerId}
                 onOpen={onOpenIdentity}
@@ -132,11 +163,16 @@ export function NameDetailView({
             </div>
             <div className="fact-cell">
               <span className="label-caps">Resolves to</span>
-              <IdentityLink
-                id={record.resolvesTo}
-                onOpen={onOpenIdentity}
-                className="fact-cell__value mono"
-              />
+              <span className="fact-cell__value-line">
+                <IdentityLink
+                  id={record.resolvesTo}
+                  onOpen={onOpenIdentity}
+                  className="fact-cell__value mono"
+                />
+                {record.resolvesTo === record.ownerId && (
+                  <span className="fact-cell__same">same as owner</span>
+                )}
+              </span>
             </div>
             <div className="fact-cell">
               <span className="label-caps">Last sale</span>
@@ -154,14 +190,16 @@ export function NameDetailView({
               className={`tab${tab === "ownership" ? " tab--active" : ""}`}
               onClick={() => setTab("ownership")}
             >
-              Ownership &amp; sales
+              <span>Ownership &amp; sales</span>
+              <span className="tab__count">{ownership.length + 1}</span>
             </button>
             <button
               type="button"
               className={`tab${tab === "priceHistory" ? " tab--active" : ""}`}
               onClick={() => setTab("priceHistory")}
             >
-              Asking-price history
+              <span>Asking price</span>
+              <span className="tab__count">{priceHistory.length}</span>
             </button>
           </div>
 
@@ -175,11 +213,10 @@ export function NameDetailView({
             />
           )}
 
-          <div className="block-warning" style={{ marginTop: 16 }}>
-            Timeline merges protocol-created <strong>transfer</strong> and{" "}
-            <strong>purchase</strong> records. Events before protocol v13 are
-            not available — transfers and sales were blocked then.
-          </div>
+          <p className="timeline-footnote">
+            History begins at protocol v13 — transfers and sales were blocked
+            before it, so nothing earlier exists on chain.
+          </p>
         </div>
 
         <aside className="buy-panel">
@@ -211,13 +248,15 @@ export function NameDetailView({
                   onClick={onBuy}
                   disabled={!canWrite}
                 >
-                  Buy this name
+                  Buy {record.label}.{record.parentDomainName}
                 </button>
               )}
 
               <div className="divider" />
 
-              <div className="buy-panel__row">
+              <div
+                className={`buy-panel__row${affordable === false ? " buy-panel__row--short" : affordable ? " buy-panel__row--covered" : ""}`}
+              >
                 <span className="buy-panel__row-label">Your balance</span>
                 <span
                   className={
@@ -228,14 +267,21 @@ export function NameDetailView({
                 >
                   {balance == null
                     ? "Sign in to see"
-                    : `${formatDash(balance)} DASH`}
+                    : affordable
+                      ? `${formatDash(balance)} DASH · covers it`
+                      : `${formatDash(balance)} DASH · ${formatDash(shortfall ?? 0n)} short`}
                 </span>
               </div>
 
-              <div className="block-inset">
-                The price is confirmed against Platform at checkout. If the
-                owner has repriced, delisted, or sold since this page loaded,
-                you'll be told before signing.
+              <div className="buy-panel__notes">
+                <p className="buy-panel__note buy-panel__note--check">
+                  Price is re-checked against Platform when you confirm — if it
+                  changed, you see the difference before anything is signed.
+                </p>
+                <p className="buy-panel__note">
+                  Settles in credits. No network fee estimate is available from
+                  the SDK, so none is shown.
+                </p>
               </div>
             </>
           ) : (

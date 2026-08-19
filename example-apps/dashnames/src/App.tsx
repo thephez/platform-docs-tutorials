@@ -30,7 +30,7 @@ import { useSalesStats } from "./hooks/useSalesStats";
 import { SessionProvider } from "./session/SessionContext";
 import { useSession } from "./session/useSession";
 import { consoleLogger, errorMessage } from "./lib/logger";
-import { DEFAULT_FILTERS, type Filters } from "./lib/filters";
+import { applyFilters, DEFAULT_FILTERS, type Filters } from "./lib/filters";
 import { ActivityView, type ActivityFilter } from "./components/ActivityView";
 import { AppHeader, type View } from "./components/AppHeader";
 import { BrowseView } from "./components/BrowseView";
@@ -68,6 +68,12 @@ function Shell() {
   const [now, setNow] = useState(() => Date.now());
   const settingsReturnView = useRef<View>("discover");
   const identityReturnView = useRef<View>("discover");
+  const [detailReturn, setDetailReturn] = useState<{
+    view: View;
+    label: string;
+    position: number | null;
+    total: number | null;
+  }>({ view: "discover", label: "discover", position: null, total: null });
 
   // Modal state
   const [buyTarget, setBuyTarget] = useState<Listing | null>(null);
@@ -171,10 +177,38 @@ function Shell() {
   );
   const lookupName = useDocumentLabels(sdk, eventDocumentIds);
 
-  const openDetail = useCallback((documentId: string) => {
-    setDetailId(documentId);
-    setView("detail");
-  }, []);
+  const browseResults = useMemo(
+    () => applyFilters(listings, filters),
+    [listings, filters],
+  );
+
+  const openDetail = useCallback(
+    (documentId: string) => {
+      const returnView = view === "detail" ? "discover" : view;
+      const labels: Partial<Record<View, string>> = {
+        browse: "browse",
+        discover: "discover",
+        activity: "activity",
+        "my-names": "my names",
+        identity: "identity",
+      };
+      const browseIndex =
+        returnView === "browse"
+          ? browseResults.findIndex(
+              (listing) => listing.documentId === documentId,
+            )
+          : -1;
+      setDetailReturn({
+        view: returnView,
+        label: labels[returnView] ?? "discover",
+        position: browseIndex >= 0 ? browseIndex + 1 : null,
+        total: browseIndex >= 0 ? browseResults.length : null,
+      });
+      setDetailId(documentId);
+      setView("detail");
+    },
+    [browseResults, view],
+  );
 
   const openIdentity = useCallback(
     (targetIdentityId: string) => {
@@ -449,7 +483,10 @@ function Shell() {
             balance={balance}
             isOwner={detailIsOwner}
             canWrite={detailIsOwner ? canWrite : canOfferBuy}
-            onBack={() => setView("discover")}
+            backLabel={detailReturn.label}
+            resultPosition={detailReturn.position}
+            resultCount={detailReturn.total}
+            onBack={() => setView(detailReturn.view)}
             onBuy={() => {
               if (!detail.record) return;
               const listing = toListing(detail.record, Date.now());
