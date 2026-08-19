@@ -35,6 +35,7 @@ export interface ListingsState {
 }
 
 const STALE_AFTER_MS = 4 * 60 * 1000;
+const BACKGROUND_CHECK_MS = 60 * 1000;
 
 export function isStale(lastSyncedAt: number | null, nowMs: number): boolean {
   if (lastSyncedAt == null) return true;
@@ -65,11 +66,13 @@ export function useListings({
 
   const requestId = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
+  const syncInFlightRef = useRef(false);
 
   // Reload from storage when the network changes — indexes are namespaced, so
   // switching must never show the other network's listings.
   useEffect(() => {
     abortRef.current?.abort();
+    syncInFlightRef.current = false;
     requestId.current += 1;
     const snapshot = store.load(network);
     setState({
@@ -91,6 +94,7 @@ export function useListings({
       const controller = new AbortController();
       abortRef.current = controller;
       const id = ++requestId.current;
+      syncInFlightRef.current = true;
       const isCurrent = () =>
         requestId.current === id && !controller.signal.aborted;
 
@@ -160,6 +164,8 @@ export function useListings({
           progress: null,
           error: errorMessage(err),
         }));
+      } finally {
+        if (requestId.current === id) syncInFlightRef.current = false;
       }
     },
     [sdk, network, log],
@@ -173,6 +179,34 @@ export function useListings({
       abortRef.current?.abort();
     };
   }, [sdk, runSync]);
+
+  // Keep an open session fresh without making the user press Refresh. The
+  // short timer only checks freshness; Platform is queried at most once per
+  // stale window, while the tab is visible, and never interrupts an active
+  // cold or incremental sync. Returning to a stale tab refreshes immediately.
+  useEffect(() => {
+    if (!sdk) return;
+
+    const refreshIfStale = () => {
+      if (document.hidden || syncInFlightRef.current) return;
+      const snapshot = store.load(network);
+      if (isStale(snapshot?.sync.completedAt ?? null, Date.now())) {
+        void runSync("auto");
+      }
+    };
+
+    const onVisibilityChange = () => {
+      if (!document.hidden) refreshIfStale();
+    };
+
+    const interval = window.setInterval(refreshIfStale, BACKGROUND_CHECK_MS);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [sdk, network, runSync]);
 
   const refresh = useCallback(() => runSync("auto"), [runSync]);
   const rebuild = useCallback(() => runSync("cold"), [runSync]);
