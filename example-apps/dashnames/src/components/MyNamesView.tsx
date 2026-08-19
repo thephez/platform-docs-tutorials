@@ -10,11 +10,20 @@
  *    needs data the protocol doesn't provide, so an invented range would be
  *    fabricated advice.
  */
+import { useEffect, useState } from "react";
 import type { DomainRecord } from "../dash/dpnsQueries";
 import { formatDash, shortId } from "../lib/format";
 import { DpnsName } from "./DpnsName";
 import { Price } from "./Price";
 import { SkeletonPortfolio } from "./Skeleton";
+
+type PortfolioFilter = "all" | "listed" | "unlisted";
+
+const FILTERS: Array<{ value: PortfolioFilter; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "listed", label: "Listed" },
+  { value: "unlisted", label: "Not listed" },
+];
 
 export function MyNamesView({
   names,
@@ -37,7 +46,61 @@ export function MyNamesView({
   onTransfer: (record: DomainRecord) => void;
   onOpen: (record: DomainRecord) => void;
 }) {
+  const [filter, setFilter] = useState<PortfolioFilter>("all");
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const listed = names.filter((n) => n.price != null && n.price > 0n);
+  const unlistedCount = names.length - listed.length;
+  const totalAsked = listed.reduce(
+    (sum, record) => sum + (record.price ?? 0n),
+    0n,
+  );
+  const visible = names.filter((record) => {
+    const isListed = record.price != null && record.price > 0n;
+    if (filter === "listed") return isListed;
+    if (filter === "unlisted") return !isListed;
+    return true;
+  });
+  const filterCounts: Record<PortfolioFilter, number> = {
+    all: names.length,
+    listed: listed.length,
+    unlisted: unlistedCount,
+  };
+
+  useEffect(() => {
+    if (!openMenuId) return;
+
+    function closeMenu(event: PointerEvent | KeyboardEvent) {
+      if (event.type === "keydown" && (event as KeyboardEvent).key !== "Escape")
+        return;
+      if (
+        event.type === "pointerdown" &&
+        event.target instanceof Element &&
+        event.target.closest(".portfolio-row__menu")
+      ) {
+        return;
+      }
+      setOpenMenuId(null);
+    }
+
+    document.addEventListener("pointerdown", closeMenu);
+    document.addEventListener("keydown", closeMenu);
+    return () => {
+      document.removeEventListener("pointerdown", closeMenu);
+      document.removeEventListener("keydown", closeMenu);
+    };
+  }, [openMenuId]);
+
+  async function copyDocumentId(documentId: string) {
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(documentId);
+        setCopiedId(documentId);
+      }
+    } finally {
+      setOpenMenuId(null);
+    }
+  }
 
   if (!identityId) {
     return (
@@ -53,24 +116,31 @@ export function MyNamesView({
 
   return (
     <>
-      <div className="page-head">
+      <div className="page-head my-names-head">
         <div>
           <h1 className="page-head__title">My names</h1>
           <p className="page-head__sub">
-            {names.length} {names.length === 1 ? "name" : "names"} owned by{" "}
-            {identityName ?? shortId(identityId)} · {listed.length} listed
-            {balance != null && ` · balance ${formatDash(balance)} DASH`}
+            Held by <strong>{identityName ?? shortId(identityId)}</strong>{" "}
+            <span className="mono">{shortId(identityId)}</span>
           </p>
         </div>
-        <div className="page-head__actions">
-          <button
-            type="button"
-            className="btn btn--outline btn--sm"
-            disabled={!canWrite || names.length === 0}
-            onClick={() => names[0] && onTransfer(names[0])}
-          >
-            Transfer a name
-          </button>
+        <div className="portfolio-summary" aria-label="Portfolio summary">
+          <div className="portfolio-summary__item">
+            <strong>{names.length}</strong>
+            <span>owned</span>
+          </div>
+          <div className="portfolio-summary__item portfolio-summary__item--listed">
+            <strong>{listed.length}</strong>
+            <span>listed</span>
+          </div>
+          <div className="portfolio-summary__item">
+            <strong>{formatDash(totalAsked)}</strong>
+            <span>DASH asked</span>
+          </div>
+          <div className="portfolio-summary__item portfolio-summary__item--balance">
+            <strong>{balance == null ? "—" : formatDash(balance)}</strong>
+            <span>DASH balance</span>
+          </div>
         </div>
       </div>
 
@@ -85,65 +155,145 @@ export function MyNamesView({
           </p>
         </div>
       ) : (
-        <div className="portfolio">
-          {names.map((record) => {
-            const isListed = record.price != null && record.price > 0n;
-            return (
-              <div key={record.documentId} className="portfolio-row">
-                <div className="portfolio-row__left">
-                  <div className="portfolio-row__name-line">
-                    <button
-                      type="button"
-                      className="portfolio-row__name"
-                      onClick={() => onOpen(record)}
-                      style={{ background: "none", border: 0, padding: 0 }}
-                    >
-                      <DpnsName
-                        label={record.label}
-                        parentDomainName={record.parentDomainName}
-                      />
-                    </button>
+        <>
+          <div className="portfolio-filters" aria-label="Filter names">
+            {FILTERS.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                className={`portfolio-filter${filter === item.value ? " portfolio-filter--active" : ""}`}
+                aria-pressed={filter === item.value}
+                onClick={() => setFilter(item.value)}
+              >
+                <span>{item.label}</span>
+                <span className="portfolio-filter__count">
+                  {filterCounts[item.value]}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="portfolio portfolio--my-names">
+            {visible.map((record) => {
+              const isListed = record.price != null && record.price > 0n;
+              return (
+                <div
+                  key={record.documentId}
+                  className={`portfolio-row portfolio-row--my-name${isListed ? " portfolio-row--listed" : ""}`}
+                >
+                  <div className="portfolio-row__left">
+                    <div className="portfolio-row__name-line">
+                      <button
+                        type="button"
+                        className="portfolio-row__name"
+                        onClick={() => onOpen(record)}
+                        style={{ background: "none", border: 0, padding: 0 }}
+                      >
+                        <DpnsName
+                          label={record.label}
+                          parentDomainName={record.parentDomainName}
+                        />
+                      </button>
+                      <span
+                        className={`portfolio-status${isListed ? " portfolio-status--listed" : ""}`}
+                      >
+                        {isListed ? "Listed" : "Idle"}
+                      </span>
+                    </div>
+                    <div className="portfolio-row__meta">
+                      rev {String(record.revision)}
+                      {record.resolvesTo === record.ownerId
+                        ? " · resolves to your identity"
+                        : " · resolves elsewhere"}
+                    </div>
                   </div>
-                  <div className="portfolio-row__meta">
-                    {isListed ? "Listed for sale" : "Not listed"} · rev{" "}
-                    {String(record.revision)}
-                    {record.resolvesTo === record.ownerId
-                      ? " · resolves to your identity"
-                      : ""}
-                  </div>
-                </div>
 
-                <div className="portfolio-row__right">
                   <div className="portfolio-row__value">
                     {isListed && record.price != null ? (
-                      <>
-                        <Price
-                          credits={record.price}
-                          align="right"
-                          compactCredits
-                          className="portfolio-row__price"
-                        />
-                        <div className="portfolio-row__state">Listed</div>
-                      </>
+                      <Price
+                        credits={record.price}
+                        align="right"
+                        compactCredits
+                        className="portfolio-row__price"
+                      />
                     ) : (
                       <span className="portfolio-row__unlisted">
-                        Not listed
+                        <strong>No price</strong>
+                        <span>not for sale</span>
                       </span>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    className={`btn btn--xs ${isListed ? "btn--outline" : "btn--primary"}`}
-                    disabled={!canWrite}
-                    onClick={() => onManage(record)}
-                  >
-                    {isListed ? "Manage" : "List for sale"}
-                  </button>
+                  <div className="portfolio-row__actions">
+                    <button
+                      type="button"
+                      className={`btn btn--xs ${isListed ? "btn--outline" : "btn--primary"}`}
+                      disabled={!canWrite}
+                      onClick={() => onManage(record)}
+                    >
+                      {isListed ? "Manage" : "List for sale"}
+                    </button>
+                    <div className="portfolio-row__menu">
+                      <button
+                        type="button"
+                        className="portfolio-row__menu-trigger"
+                        aria-label={`More actions for ${record.label}.${record.parentDomainName}`}
+                        aria-haspopup="menu"
+                        aria-expanded={openMenuId === record.documentId}
+                        onClick={() =>
+                          setOpenMenuId((current) =>
+                            current === record.documentId
+                              ? null
+                              : record.documentId,
+                          )
+                        }
+                      >
+                        ⋮
+                      </button>
+                      {openMenuId === record.documentId && (
+                        <div
+                          className="portfolio-row__menu-popover"
+                          role="menu"
+                        >
+                          <button
+                            type="button"
+                            role="menuitem"
+                            disabled={!canWrite}
+                            onClick={() => {
+                              setOpenMenuId(null);
+                              onTransfer(record);
+                            }}
+                          >
+                            Transfer
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setOpenMenuId(null);
+                              onOpen(record);
+                            }}
+                          >
+                            View
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() =>
+                              void copyDocumentId(record.documentId)
+                            }
+                          >
+                            {copiedId === record.documentId
+                              ? "Copied"
+                              : "Copy ID"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        </>
       )}
     </>
   );
