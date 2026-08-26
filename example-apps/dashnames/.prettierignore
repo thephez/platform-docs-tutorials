@@ -1,0 +1,18 @@
+dist
+node_modules
+coverage
+playwright-report
+test-results
+
+# Markdown is hand-maintained. Prettier pads table cells to visually align them,
+# which bloats every row to the width of the longest cell and makes diffs on one
+# cell rewrite the whole table. Tables here stay compact (`| - | - |`), matching
+# the repo-root CLAUDE.md.
+*.md
+
+# Shared authentication sources stay byte-identical to Dashnote/TokenOps and
+# are guarded by scripts/check-shared-auth-parity.sh.
+src/dash/loginWithPrivateKey.ts
+src/lib/detectSecretShape.ts
+src/session/keyManagerFromKey.ts
+test/loginWithPrivateKey.test.ts
