@@ -44,7 +44,6 @@ describe("parseProtocolStatus", () => {
   it("enables sales on a v13 network", () => {
     const status = parseProtocolStatus(testnetStatus);
     expect(status.activeProtocolVersion).toBe(13);
-    expect(status.salesEnabled).toBe(true);
   });
 
   it("disables sales on a v12 network even when it knows about v13", () => {
@@ -52,7 +51,6 @@ describe("parseProtocolStatus", () => {
     const status = parseProtocolStatus(mainnetStatus);
     expect(status.activeProtocolVersion).toBe(12);
     expect(status.knownProtocolVersion).toBe(13);
-    expect(status.salesEnabled).toBe(false);
   });
 
   it("reads the PROTOCOL version, never the Drive software release", () => {
@@ -83,7 +81,7 @@ describe("parseProtocolStatus", () => {
     expect(status.blockHeight).toBe(12_345n);
   });
 
-  describe("fails closed", () => {
+  describe("unavailable values", () => {
     it.each([
       ["null", null],
       ["undefined", undefined],
@@ -94,10 +92,9 @@ describe("parseProtocolStatus", () => {
         "non-numeric current",
         { version: { protocol: { drive: { current: "13" } } } },
       ],
-    ])("%s leaves sales disabled", (_label, input) => {
+    ])("%s leaves the active version unknown", (_label, input) => {
       const status = parseProtocolStatus(input);
       expect(status.activeProtocolVersion).toBeNull();
-      expect(status.salesEnabled).toBe(false);
     });
 
     it("a throwing toJSON does not surface a block height", () => {
@@ -110,13 +107,11 @@ describe("parseProtocolStatus", () => {
         },
       });
       expect(status.blockHeight).toBeNull();
-      // The version is still readable, so the gate stays open on its own merit.
-      expect(status.salesEnabled).toBe(true);
+      expect(status.activeProtocolVersion).toBe(13);
     });
   });
 
-  it("the exported default is closed", () => {
-    expect(UNKNOWN_PROTOCOL_STATUS.salesEnabled).toBe(false);
+  it("exports an empty default", () => {
     expect(UNKNOWN_PROTOCOL_STATUS.activeProtocolVersion).toBeNull();
   });
 });

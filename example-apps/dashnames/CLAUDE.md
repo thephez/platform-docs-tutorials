@@ -8,7 +8,7 @@ React + TypeScript + Vite app for buying and selling DPNS usernames (`alice.dash
 
 The app's reason to exist is the **listings index**: `$price` is not an indexed property on `domain`, so Platform cannot answer "what is for sale" — a `where` clause on it is rejected outright. The app reconstructs that answer client-side from the Document History contract's price-update stream, then confirms every candidate against its current document. See [The listings index](#the-listings-index).
 
-The shell is a view-state app (`discover` / `browse` / `detail` / `identity` / `my-names` / `activity` / `settings`, plus a `how` guide). The read-only identity page uses DPNS's indexed `records.identity` query and therefore shows names that resolve to an identity; it marks ownership separately. Browsing, search, identity lookup, and history need no sign-in; listing, buying, and transferring require a mnemonic and a network at protocol v13 or above. Trading works on testnet (v13) and is disabled on mainnet (v12). On mainnet the Document History contract does not exist yet either, so name search and lookup work but listings, activity, and sales stats are unavailable — see [rule 6b](#6b-the-history-contract-may-not-exist-on-the-network-at-all).
+The shell is a view-state app (`discover` / `browse` / `detail` / `identity` / `my-names` / `activity` / `settings`, plus a `how` guide). The read-only identity page uses DPNS's indexed `records.identity` query and therefore shows names that resolve to an identity; it marks ownership separately. Browsing, search, identity lookup, and history need no sign-in; listing, buying, and transferring require a mnemonic and a network at protocol v13 or above. Both networks run v13; trading works on testnet, while mainnet credential entry remains disabled pending a separate production safety review.
 
 ## Commands
 
@@ -31,7 +31,7 @@ The shell is a view-state app (`discover` / `browse` / `detail` / `identity` / `
   - [listingsIndex.ts](src/dash/listingsIndex.ts) — ★ `coldSync` / `incrementalSync` / `reconcile`. The discovery algorithm; see [The listings index](#the-listings-index).
   - [listingsStore.ts](src/dash/listingsStore.ts) — atomic localStorage snapshot (listings + all watermarks in one write). Synchronous.
   - [historyQueries.ts](src/dash/historyQueries.ts) / [dpnsQueries.ts](src/dash/dpnsQueries.ts) / [historyAggregates.ts](src/dash/historyAggregates.ts) — reads.
-  - [protocolVersion.ts](src/dash/protocolVersion.ts) — the v13 gate, fail-closed.
+  - [protocolVersion.ts](src/dash/protocolVersion.ts) — informational protocol and block status.
   - [withAuthedDocument.ts](src/dash/withAuthedDocument.ts) + [setPrice.ts](src/dash/setPrice.ts) / [purchaseName.ts](src/dash/purchaseName.ts) / [transferName.ts](src/dash/transferName.ts) — the three writes.
   - [resolveRecipient.ts](src/dash/resolveRecipient.ts) / [classifyRecipientInput.ts](src/dash/classifyRecipientInput.ts) — transfer-recipient resolution; distinguishes identity IDs from DPNS names by character set.
   - [marketplaceErrors.ts](src/dash/marketplaceErrors.ts) — typed error set; classification only, no product copy.
@@ -48,9 +48,8 @@ This app registers **no** contract of its own — it reads and writes two system
 | Constant | Value | Role |
 | - | - | - |
 | `DPNS_CONTRACT_ID` | `GWRSAVFMjXx8HpQFaNJMqBV7MBgMK4br5UESsB4S31Ec` | The `domain` documents that are the tradeable asset. Same on both networks. |
-| `HISTORY_CONTRACT_ID` | `6voHRaoiPcfmMhbqCA9dixH98xcgPQ9UEcuaXjpVu3LD` | Document History system contract that DPNS opted into at v13. Source of the `priceUpdate` / `purchase` / `transfer` streams. **Testnet only today** — created by the v13 upgrade, so it does not exist on mainnet (v12). Same deterministic ID once mainnet activates v13. |
+| `HISTORY_CONTRACT_ID` | `6voHRaoiPcfmMhbqCA9dixH98xcgPQ9UEcuaXjpVu3LD` | Document History system contract that DPNS opted into at v13. Source of the `priceUpdate` / `purchase` / `transfer` streams. The deterministic ID is shared by testnet and mainnet. |
 | `MAX_IN_CLAUSE` | `100` | Hard cap on an `$id IN` batch — 101 is rejected. See [rule 8](#8-in-is-capped-at-exactly-100). |
-| `SALES_MIN_PROTOCOL_VERSION` | `13` | The write gate. See [rule 9](#9-gate-on-the-active-protocol-version-and-know-which-field-that-is). |
 
 There is no `DEFAULT_CONTRACT_ID` / contract-registration flow and no `localStorage` contract override, unlike the sibling apps — the contracts are fixed system contracts. The persisted `localStorage` state is the listings index snapshot (per network), not a contract ID.
 
@@ -75,7 +74,7 @@ The discovery algorithm in [listingsIndex.ts](src/dash/listingsIndex.ts) is what
 - **Batch-fetch by ID** ([dpnsQueries.ts](src/dash/dpnsQueries.ts)): `sdk.documents.query` with an `$id IN` clause, chunked at `MAX_IN_CLAUSE` and run **sequentially**.
 - **Read history** ([historyQueries.ts](src/dash/historyQueries.ts)): `sdk.documents.query` over the History contract's `priceUpdate` / `purchase` / `transfer` types via the `byContract` index.
 - **Aggregates** ([historyAggregates.ts](src/dash/historyAggregates.ts)): `sdk.documents.count` and `sdk.documents.sum` for sales stats. Both need a `$createdAt between` bound to match the index exactly — see [rule 6](#6-aggregates-two-rules-that-break-the-queries).
-- **Protocol gate** ([protocolVersion.ts](src/dash/protocolVersion.ts)): `sdk.system.status()` → `version.protocol.drive.current`. Fail-closed.
+- **Network status** ([protocolVersion.ts](src/dash/protocolVersion.ts)): `sdk.system.status()` → active protocol version and block height. Informational only.
 - **List / reprice / delist** ([setPrice.ts](src/dash/setPrice.ts)): `sdk.documents.setPrice({ document, price: bigint, identityKey, signer })`. A price of `0n` delists.
 - **Buy** ([purchaseName.ts](src/dash/purchaseName.ts)): `sdk.documents.purchase({ document, buyerId, price: bigint, identityKey, signer })`.
 - **Transfer** ([transferName.ts](src/dash/transferName.ts)): `sdk.documents.transfer({ document, recipientId, identityKey, signer })`.
@@ -83,7 +82,7 @@ The discovery algorithm in [listingsIndex.ts](src/dash/listingsIndex.ts) is what
 - **Label normalization**: `sdk.dpns.convertToHomographSafe(label)` via `toNormalizedLabel` ([dpnsQueries.ts](src/dash/dpnsQueries.ts)) — required before any `normalizedLabel` query. See [rule 6c](#6c-query-normalizedlabel-with-the-homograph-fold-not-the-raw-label).
 - **Balance**: `sdk.identities.balance(identityId)` → `bigint`, called from `SessionContext`.
 
-All three writes flow through [withAuthedDocument.ts](src/dash/withAuthedDocument.ts), which fetches the document, bumps its revision, resolves the auth signer, and enforces the `salesEnabled` gate before any SDK call. See [The extractable seam](#the-extractable-seam).
+All three writes flow through [withAuthedDocument.ts](src/dash/withAuthedDocument.ts), which fetches the document, bumps its revision, and resolves the auth signer. See [The extractable seam](#the-extractable-seam).
 
 ## Correctness rules — read before touching data code
 
@@ -158,7 +157,7 @@ Display always uses the record's real `label` (`latte`), never the folded form.
 
 101 IDs → "invalid IN clause error". Chunks run **sequentially**, not `Promise.all`: trusted nodes throttle and wide fan-out surfaces as opaque connection resets.
 
-### 9. Gate on the ACTIVE protocol version, and know which field that is
+### 9. Protocol status is informational
 
 `sdk.system.status()` reports two unrelated kinds of version, and it is easy to grab the wrong one:
 
@@ -170,7 +169,7 @@ version.protocol.tenderdash {p2p: 10, block: 14}       <- Tenderdash's protocols
 
 `version.protocol` is keyed by _which protocol_, so the platform protocol version sits under `drive` because Drive is the component that defines it. It is a protocol version (13), **not** a Drive release (4.1.0). The parsed field is named `activeProtocolVersion` precisely so this doesn't read as "Drive 13".
 
-Read `current`, not `latest`. Verified 2026-08-05: testnet `{latest: 13, current: 13}`, mainnet `{latest: 13, current: 12}` — keying off `latest` would wrongly enable selling on mainnet. `sdk.version()` is a third, different number (12 / 11, the SDK's negotiated version) and is **not** the gate. Unknown version ⇒ writes disabled.
+Read `current`, not `latest`. Verified 2026-08-26: both networks report `{latest: 13, current: 13}`. Protocol activation is monotonic and these are the app's only supported networks, so the old compatibility gate was removed. `sdk.version()` is a third, different number (the SDK's negotiated version). A status-read failure leaves the version unknown without disabling writes.
 
 `sdk.system.status()` returns WASM handles whose fields are unreachable by plain property access (`status.chain` has only `__wbg_ptr`); [protocolVersion.ts](src/dash/protocolVersion.ts) falls back to `toJSON()` there. That is safe for status — block heights come back as decimal strings — unlike a document's `$price`.
 
@@ -184,7 +183,6 @@ The buy modal revalidates on open, expires its quote after ~30s, **and re-fetche
 
 - **No DPNS knowledge.** `documentTypeName` and `contractId` are parameters. No `"domain"` literal, no `.dash` logic, no import of `contracts.ts`.
 - **Generic vocabulary** — `documentId`, never `nameId`.
-- **Callers supply policy** — `salesEnabled` is passed in. Each write rejects **before any SDK call** when it is false; UI gating alone is not a gate.
 - **Typed results and typed errors, never UI strings.** The view layer owns the wording.
 
 Extraction to `example-apps/shared/marketplace/` is justified when a second consumer needs it — i.e. when DashMint is retargeted onto these helpers. [listingsIndex.ts](src/dash/listingsIndex.ts) is the _second_ candidate: the algorithm is generic but it is also the least proven code here.
@@ -202,8 +200,8 @@ The original design called for several features the SDK cannot support, plus a f
 | Feature | What shipped | Why |
 | - | - | - |
 | Fee rows (Processing / Storage / Total required / Balance after) | **Dropped.** Affordability checked against the price alone. | There is no fee-estimation, dry-run, or simulation method in evo-sdk 4.1.0. The only fee-bearing types belong to `FinalizedEpochInfo` — epoch aggregates, not per-transition quotes. Any figure would be invented. A future quote API is an obvious addition here. |
-| Transaction ID + "were credits spent" on failure | **Not shown.** The protocol error message _is_ shown. | The write methods resolve `void` and expose no state-transition hash. `transitionId?` is reserved in the result type and stays `undefined`. "Nothing was signed" is claimed only where provable: the confirm-time revalidation and the `salesEnabled` gate. |
-| `MAINNET · BLOCK N` footer | Renders the **live** network. | Sales need v13; mainnet is v12. The app defaults to testnet with a persisted, user-selectable network. |
+| Transaction ID + "were credits spent" on failure | **Not shown.** The protocol error message _is_ shown. | The write methods resolve `void` and expose no state-transition hash. `transitionId?` is reserved in the result type and stays `undefined`. |
+| `MAINNET · BLOCK N` footer | Renders the **live** network. | Both networks meet the v13 sales requirement. The app defaults to testnet with a persisted, user-selectable network. |
 | "Est. 3–6 DASH · from comparable sales" | **Dropped.** | Comparable-sales valuation needs data the protocol doesn't provide. |
 | Shelves (curated collections) | **Dropped.** | No protocol notion of a curated set — there is nothing on-chain to populate one from. |
 | Popular chips (`pay.dash`, `bank.dash`) | Derived from the live index; row hidden when empty. | Those specific names were illustrative samples, not real listings. Deriving from the index keeps the row honest and lets it vanish when there is nothing to show. |
@@ -226,12 +224,12 @@ Cold start has **two** monotonically growing phases, and neither shrinks:
 
 Repricing makes event count grow faster than candidate count. A successfully persisted snapshot makes later loads incremental, so each browser profile normally pays this once — but cleared storage, a schema bump, a quota failure, or a new device forces it again. A server-side indexer or checkpointed snapshot is the required successor before the dataset approaches this scale.
 
-## Verified on testnet (2026-08-05)
+## Verified on network (protocol status refreshed 2026-08-26)
 
 | Fact | Value |
 | - | - |
-| Active protocol | testnet **13** · mainnet **12** (`latest` 13 on both) |
-| Document History contract | `6voHRaoiPcfmMhbqCA9dixH98xcgPQ9UEcuaXjpVu3LD` (testnet only — absent on mainnet until v13) |
+| Active protocol | testnet **13** · mainnet **13** (`latest` 13 on both) |
+| Document History contract | `6voHRaoiPcfmMhbqCA9dixH98xcgPQ9UEcuaXjpVu3LD` (deterministic across both v13 networks) |
 | DPNS contract | `GWRSAVFMjXx8HpQFaNJMqBV7MBgMK4br5UESsB4S31Ec` |
 | `where` on `$price` over `domain` | **rejected** — "where clause on non indexed property error" |
 | Max `IN` clause | exactly **100** (101 → "invalid IN clause error") |
@@ -249,9 +247,9 @@ Vitest ([test/](test/), flat directory, files named after the subject under test
 
 The suite is organized by behavior:
 
-- **Lossless reads and protocol safety** cover raw document decoding, bigint formatting, aggregate-query edge cases, and active protocol-version gating. [safeDoc.test.ts](test/safeDoc.test.ts) is the landmark suite for [rules 1–3](#1-never-read-a-numeric-field-through-tojson).
+- **Lossless reads** cover raw document decoding, bigint formatting, and aggregate-query edge cases. [safeDoc.test.ts](test/safeDoc.test.ts) is the landmark suite for [rules 1–3](#1-never-read-a-numeric-field-through-tojson).
 - **Discovery and persistence** cover candidate nomination, current-document confirmation, boundary replay/watermarks, filtering, and atomic localStorage snapshots. See [listingsIndex.test.ts](test/listingsIndex.test.ts) for the core discovery invariants in [rules 4–5](#4-history-nominates-candidates-the-current-document-decides).
-- **Writes and purchase safety** cover revision/auth-key selection, the `salesEnabled` fail-closed gate, confirm-time revalidation, and quote expiry. The key suites are [writeOps.test.ts](test/writeOps.test.ts) and [BuyModal.test.tsx](test/BuyModal.test.tsx).
+- **Writes and purchase safety** cover revision/auth-key selection, confirm-time revalidation, and quote expiry. The key suites are [writeOps.test.ts](test/writeOps.test.ts) and [BuyModal.test.tsx](test/BuyModal.test.tsx).
 - **Components and responsive UI** cover modal focus/scroll behavior, authentication state, name resolution, card actions, pricing, and metadata across desktop and narrow layouts.
 
 E2E ([test/e2e/smoke.spec.ts](test/e2e/smoke.spec.ts), Playwright, port 5185, real testnet, chromium only, serial). **Read-only — no chain writes, no credentials needed**, so it always runs. It asserts rendering and navigation, not live listing data: testnet may have zero listings at any moment, so a spec requiring a populated grid would be flaky by construction — the empty states are themselves asserted. There is **one Playwright project**; focused tests resize it to 375px to cover real signed-out header/login behavior and the signed-in narrow-header CSS contract without creating a separate mobile browser/device matrix. The CSS-contract test deliberately injects the signed-in state class; [IdentityChip.test.tsx](test/IdentityChip.test.tsx) separately verifies that the real component emits that class. Write flows are covered by unit tests only — see [Verified on testnet](#verified-on-testnet-2026-08-05) for what has and hasn't run against the live contract.

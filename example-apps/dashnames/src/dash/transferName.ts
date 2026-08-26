@@ -25,7 +25,6 @@ export interface TransferNameParams {
   documentTypeName: string;
   documentId: string;
   recipientId: string;
-  salesEnabled: boolean;
   log?: Logger;
 }
 
@@ -36,7 +35,6 @@ export async function transferName({
   documentTypeName,
   documentId,
   recipientId,
-  salesEnabled,
   log,
 }: TransferNameParams): Promise<MarketplaceResult> {
   if (!recipientId) {
@@ -55,7 +53,6 @@ export async function transferName({
       contractId,
       documentTypeName,
       documentId,
-      salesEnabled,
       log,
     },
     async ({ doc, identityKey, signer }) => {

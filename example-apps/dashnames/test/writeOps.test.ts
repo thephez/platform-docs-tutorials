@@ -42,52 +42,6 @@ const common = {
   documentId: "d1",
 };
 
-describe("the protocol gate rejects before any SDK call", () => {
-  it("blocks setPrice when sales are disabled", async () => {
-    const { sdk, keyManager } = makeSdk();
-    const result = await setPrice({
-      sdk,
-      keyManager,
-      ...common,
-      price: 10n,
-      salesEnabled: false,
-    });
-    expect(result).toEqual({
-      ok: false,
-      error: expect.objectContaining({ kind: "SalesDisabled" }),
-    });
-    // UI gating alone is not a gate — nothing may reach the network.
-    expect(sdk.documents.get).not.toHaveBeenCalled();
-    expect(sdk.documents.setPrice).not.toHaveBeenCalled();
-  });
-
-  it("blocks purchase when sales are disabled", async () => {
-    const { sdk, keyManager } = makeSdk();
-    const result = await purchaseName({
-      sdk,
-      keyManager,
-      ...common,
-      price: 10n,
-      salesEnabled: false,
-    });
-    expect(result.ok).toBe(false);
-    expect(sdk.documents.purchase).not.toHaveBeenCalled();
-  });
-
-  it("blocks transfer when sales are disabled", async () => {
-    const { sdk, keyManager } = makeSdk();
-    const result = await transferName({
-      sdk,
-      keyManager,
-      ...common,
-      recipientId: "r1",
-      salesEnabled: false,
-    });
-    expect(result.ok).toBe(false);
-    expect(sdk.documents.transfer).not.toHaveBeenCalled();
-  });
-});
-
 describe("revision handling", () => {
   it("bumps the fetched revision by exactly one", async () => {
     const { sdk, keyManager, calls } = makeSdk();
@@ -96,7 +50,6 @@ describe("revision handling", () => {
       keyManager,
       ...common,
       price: 10n,
-      salesEnabled: true,
     });
     const args = calls.setPrice[0] as { document: { revision: bigint } };
     // Platform rejects mutations that don't strictly increase the revision.
@@ -115,7 +68,6 @@ describe("price fidelity", () => {
       keyManager,
       ...common,
       price: unsafe,
-      salesEnabled: true,
     });
     const args = calls.purchase[0] as { price: bigint };
     expect(args.price).toBe(unsafe);
@@ -129,7 +81,6 @@ describe("price fidelity", () => {
       keyManager,
       ...common,
       price: 0n,
-      salesEnabled: true,
     });
     expect(result.ok).toBe(true);
     expect((calls.setPrice[0] as { price: bigint }).price).toBe(0n);
@@ -144,7 +95,6 @@ describe("purchase identity", () => {
       keyManager,
       ...common,
       price: 5n,
-      salesEnabled: true,
     });
     expect((calls.purchase[0] as { buyerId: string }).buyerId).toBe("buyer-1");
   });
@@ -158,7 +108,6 @@ describe("transfer validation", () => {
       keyManager,
       ...common,
       recipientId: "",
-      salesEnabled: true,
     });
     expect(result.ok).toBe(false);
     expect(sdk.documents.transfer).not.toHaveBeenCalled();
@@ -176,7 +125,6 @@ describe("failures return typed errors carrying the protocol message", () => {
       keyManager,
       ...common,
       price: 5n,
-      salesEnabled: true,
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -192,7 +140,6 @@ describe("failures return typed errors carrying the protocol message", () => {
       keyManager,
       ...common,
       price: 5n,
-      salesEnabled: true,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;

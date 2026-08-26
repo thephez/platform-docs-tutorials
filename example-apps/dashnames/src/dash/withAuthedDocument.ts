@@ -7,18 +7,15 @@
  * is mechanically identical to trading an NFT `card`.
  *
  * Every mutation follows the same steps:
- *   1. Reject up front if the caller's policy says sales are disabled.
- *   2. Get an auth signer for the current identity.
- *   3. Fetch the current on-chain document (needed for its revision).
- *   4. Bump `document.revision` by 1 — Platform rejects mutations that do not
+ *   1. Get an auth signer for the current identity.
+ *   2. Fetch the current on-chain document (needed for its revision).
+ *   3. Bump `document.revision` by 1 — Platform rejects mutations that do not
  *      strictly increase it.
- *   5. Call the one SDK method unique to the operation.
+ *   4. Call the one SDK method unique to the operation.
  *
  * EXTRACTABLE — this file must compile unchanged if moved to a shared module:
  * no DPNS knowledge, no `"domain"` literal, no `.dash` logic, generic parameter
- * names, and the protocol gate supplied by the caller rather than read from a
- * DPNS-specific hook. "Which protocol version" is a caller concern; "sales are
- * gated" is the marketplace's.
+ * names.
  *
  * NOTE the transfer path deliberately uses the AUTHENTICATION key, not the
  * TRANSFER-purpose key — Platform rejects TRANSFER-purpose keys for document
@@ -49,11 +46,6 @@ export interface WithAuthedDocumentOptions {
   contractId: string;
   documentTypeName: string;
   documentId: string;
-  /**
-   * Caller-supplied protocol gate. When false the operation is rejected BEFORE
-   * any SDK call — UI gating alone is not a gate.
-   */
-  salesEnabled: boolean;
   log?: Logger;
 }
 
@@ -67,24 +59,8 @@ export async function withAuthedDocument<T>(
   opts: WithAuthedDocumentOptions,
   fn: (ctx: AuthedDocumentContext) => Promise<T>,
 ): Promise<{ ok: true; value: T } | { ok: false; error: MarketplaceError }> {
-  const {
-    sdk,
-    keyManager,
-    contractId,
-    documentTypeName,
-    documentId,
-    salesEnabled,
-    log,
-  } = opts;
-
-  if (!salesEnabled) {
-    const error = marketplaceError(
-      "SalesDisabled",
-      "This network's active protocol version does not support document sales.",
-    );
-    log?.(error.message, "error");
-    return { ok: false, error };
-  }
+  const { sdk, keyManager, contractId, documentTypeName, documentId, log } =
+    opts;
 
   try {
     const { identity, identityKey, signer } = await keyManager.getAuth();

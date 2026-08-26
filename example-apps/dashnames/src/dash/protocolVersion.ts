@@ -2,8 +2,9 @@
  * Reads the network's ACTIVE platform protocol version.
  *
  * DPNS trading was blocked before protocol v13 by a hardcoded
- * `reject_data_trigger` on `domain` documents. v13 drops those bindings, so
- * every write in this app is gated on it.
+ * `reject_data_trigger` on `domain` documents. Both supported networks have
+ * permanently activated v13, so this status is informational rather than a
+ * write gate.
  *
  * WHERE THE NUMBER LIVES. `sdk.system.status()` reports two unrelated kinds of
  * version, and it is easy to grab the wrong one:
@@ -17,17 +18,15 @@
  * defines it. It is a protocol version (13), NOT a Drive release (4.1.0).
  *
  * Read `current`, NOT `latest`: `latest` is the newest version the network knows
- * about, while `current` is what it is actually running. Verified 2026-08-05 —
- * testnet reported `{latest: 13, current: 13}` and mainnet
- * `{latest: 13, current: 12}`, so keying off `latest` would wrongly enable
- * selling on mainnet.
+ * about, while `current` is what it is actually running. The distinction
+ * mattered while mainnet knew about v13 but still ran v12. Verified 2026-08-26:
+ * both testnet and mainnet now report `{latest: 13, current: 13}`.
  *
- * Note `sdk.version()` is a third, different number (the SDK's negotiated
- * version, observed 12 on testnet / 11 on mainnet) and is NOT the gate.
+ * Note `sdk.version()` is a third, different number: the SDK's negotiated
+ * version rather than the network status shown here.
  *
  * SDK method: sdk.system.status()
  */
-import { SALES_MIN_PROTOCOL_VERSION } from "./contracts";
 import type { DashSdk } from "./types";
 
 export interface ProtocolStatus {
@@ -41,8 +40,6 @@ export interface ProtocolStatus {
    * (`version.protocol.drive.latest`). Informational only — never the gate.
    */
   knownProtocolVersion: number | null;
-  /** True only when the active version is known AND high enough. */
-  salesEnabled: boolean;
   /** Current block height, for the sync chip and footer. */
   blockHeight: bigint | null;
 }
@@ -90,8 +87,8 @@ function pick(source: unknown, key: string): unknown {
 /**
  * Parses `sdk.system.status()`.
  *
- * FAILS CLOSED: any shape we cannot read leaves `activeProtocolVersion` null and
- * `salesEnabled` false. An unknown protocol version must never enable writes.
+ * Any shape we cannot read leaves `activeProtocolVersion` null. Protocol status
+ * is informational now that both supported networks permanently meet v13.
  */
 export function parseProtocolStatus(status: unknown): ProtocolStatus {
   const protocol = pick(pick(status, "version"), "protocol");
@@ -111,18 +108,14 @@ export function parseProtocolStatus(status: unknown): ProtocolStatus {
   return {
     activeProtocolVersion,
     knownProtocolVersion,
-    salesEnabled:
-      activeProtocolVersion != null &&
-      activeProtocolVersion >= SALES_MIN_PROTOCOL_VERSION,
     blockHeight,
   };
 }
 
-/** The fail-closed default used before a status read completes or after it errors. */
+/** The empty status used before a status read completes or after it errors. */
 export const UNKNOWN_PROTOCOL_STATUS: ProtocolStatus = {
   activeProtocolVersion: null,
   knownProtocolVersion: null,
-  salesEnabled: false,
   blockHeight: null,
 };
 

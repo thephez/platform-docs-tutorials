@@ -45,15 +45,6 @@ test("the sync chip reports a real index state", async ({ page }) => {
   await expect(chip).toHaveText(/SYNCED|SYNCING|NOT SYNCED|LAST SYNCED|FAILED/);
 });
 
-test("testnet shows no protocol gate banner (v13 is active)", async ({
-  page,
-}) => {
-  await page.goto("/");
-  await expect(page.locator(".sync-chip").first()).toBeVisible();
-  // Sales are enabled on testnet, so the gate must not appear.
-  await expect(page.locator(".gate-banner")).toHaveCount(0);
-});
-
 test("browse shows the filter sidebar and all four filter groups", async ({
   page,
 }) => {

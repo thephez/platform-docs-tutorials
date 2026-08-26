@@ -23,7 +23,6 @@ export interface PurchaseNameParams {
   documentId: string;
   /** Must match the on-chain `$price` exactly. Carried as bigint end to end. */
   price: bigint;
-  salesEnabled: boolean;
   log?: Logger;
 }
 
@@ -34,7 +33,6 @@ export async function purchaseName({
   documentTypeName,
   documentId,
   price,
-  salesEnabled,
   log,
 }: PurchaseNameParams): Promise<MarketplaceResult> {
   log?.(`Purchasing ${documentId} for ${price} credits…`);
@@ -46,7 +44,6 @@ export async function purchaseName({
       contractId,
       documentTypeName,
       documentId,
-      salesEnabled,
       log,
     },
     async ({ doc, identity, identityKey, signer }) => {

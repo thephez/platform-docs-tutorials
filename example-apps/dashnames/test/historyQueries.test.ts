@@ -9,7 +9,8 @@ import type { DashSdk } from "../src/dash/types";
 
 /**
  * The real error, captured live against mainnet on 2026-08-05. The History
- * contract is created by the v13 upgrade, which mainnet (v12) hasn't activated.
+ * contract is created by the v13 upgrade and can be unavailable on older or
+ * partially upgraded networks.
  */
 const MISSING_CONTRACT_ERROR = "Data contract not found";
 

@@ -694,21 +694,6 @@ h1 {
   color: var(--text-body);
 }
 
-/* Protocol gate banner */
-.gate-banner {
-  margin: 0;
-  padding: 11px 44px;
-  background: var(--warning-tint);
-  border-bottom: 1px solid var(--warning-tint-border);
-  font-size: 12px;
-  line-height: 1.55;
-  color: var(--warning-amber-text);
-}
-
-.gate-banner strong {
-  color: var(--warning-amber);
-}
-
 /* ------------------------------------------------------------------ skeleton */
 
 /* Grids and tables load as skeleton tiles/rows at the same dimensions,
@@ -2877,11 +2862,6 @@ h1 {
 
   .header-search {
     display: none;
-  }
-
-  .gate-banner {
-    padding: 11px 16px;
-    font-size: 11px;
   }
 
   .hero {

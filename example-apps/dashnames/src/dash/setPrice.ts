@@ -23,7 +23,6 @@ export interface SetPriceParams {
   documentId: string;
   /** Price in credits. `0n` removes the document from sale. */
   price: bigint;
-  salesEnabled: boolean;
   log?: Logger;
 }
 
@@ -34,7 +33,6 @@ export async function setPrice({
   documentTypeName,
   documentId,
   price,
-  salesEnabled,
   log,
 }: SetPriceParams): Promise<MarketplaceResult> {
   const removing = price === 0n;
@@ -51,7 +49,6 @@ export async function setPrice({
       contractId,
       documentTypeName,
       documentId,
-      salesEnabled,
       log,
     },
     async ({ doc, identityKey, signer }) => {

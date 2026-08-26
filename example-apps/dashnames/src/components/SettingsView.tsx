@@ -39,8 +39,9 @@ export function SettingsView({
     <div className="prose">
       <h2>Network</h2>
       <p>
-        DPNS name sales need protocol v13. testnet is on v13 today; mainnet is
-        still on v12, so writes are disabled there.
+        DPNS name sales need protocol v13. Both testnet and mainnet currently
+        meet that requirement; mainnet sign-in remains disabled pending a
+        separate production safety review.
       </p>
       <div className="network-toggle">
         {(["testnet", "mainnet"] as Network[]).map((n) => (
@@ -63,8 +64,6 @@ export function SettingsView({
           ` (network knows v${protocol.knownProtocolVersion})`}
         {protocol.blockHeight != null &&
           ` · block ${formatBlock(protocol.blockHeight)}`}
-        {" · sales "}
-        {protocol.salesEnabled ? "enabled" : "disabled"}
       </p>
 
       <h2>Identity</h2>

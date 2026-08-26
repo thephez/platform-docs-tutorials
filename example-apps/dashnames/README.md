@@ -2,7 +2,7 @@
 
 `dashnames` is a complete, browser-based example of discovering and trading DPNS usernames such as `alice.dash` on Dash Platform. Visitors can search names, browse verified listings, inspect identities and the names resolving to them, inspect ownership and asking-price history, and review protocol-recorded market activity without signing in. A funded identity can list, reprice, delist, purchase, or permanently transfer a name directly from the browser.
 
-The app is both a functional testnet marketplace and a focused Platform tutorial. It shows the parts a production UI cannot safely skip: proof-backed reads, lossless `u64` handling, revision-bound writes, active-protocol gating, identity signing, stale-listing detection immediately before purchase, and recovery of current marketplace state from append-only history.
+The app is both a functional testnet marketplace and a focused Platform tutorial. It shows the parts a production UI cannot safely skip: proof-backed reads, lossless `u64` handling, revision-bound writes, identity signing, stale-listing detection immediately before purchase, and recovery of current marketplace state from append-only history.
 
 ## What this example demonstrates
 
@@ -48,7 +48,9 @@ npm run preview        # serve production build locally
 
 ## Network support
 
-The app defaults to testnet and shows an explanatory banner on any network below v13. The gate reads the network's **active platform protocol version** — `version.protocol.drive.current` from `sdk.system.status()`, which is a protocol version — and fails closed when it can't be determined.
+The app defaults to testnet. Both supported networks permanently meet the v13
+requirement for DPNS trading, so protocol status is informational and a status
+read failure does not disable marketplace operations.
 
 The network selector is always available in the header, including while signed
 out. Switching networks immediately signs out and clears the in-memory key
@@ -67,7 +69,8 @@ This app registers no contract of its own — it reads and writes two system con
 | DPNS | `GWRSAVFMjXx8HpQFaNJMqBV7MBgMK4br5UESsB4S31Ec` | The `domain` documents that are the tradeable asset |
 | Document History | `6voHRaoiPcfmMhbqCA9dixH98xcgPQ9UEcuaXjpVu3LD` | The `priceUpdate` / `purchase` / `transfer` streams the listings index is built from |
 
-DPNS exists on both networks. Document History is created by the v13 upgrade, so it is **testnet-only today** — the ID is deterministic and becomes valid on mainnet once v13 activates there.
+DPNS and Document History exist on both networks. Document History was created
+by the v13 upgrade and uses the same deterministic ID on testnet and mainnet.
 
 There is no contract-registration flow and no contract-ID setting — unlike the sibling example apps, which each register their own contract.
 
@@ -82,7 +85,7 @@ Every SDK call lives under [`src/dash/`](./src/dash/), one file per concern, eac
 | Read history streams | [`historyQueries.ts`](./src/dash/historyQueries.ts) | `sdk.documents.query` |
 | Sales stats | [`historyAggregates.ts`](./src/dash/historyAggregates.ts) | `sdk.documents.count`, `sdk.documents.sum` |
 | Build the listings index | [`listingsIndex.ts`](./src/dash/listingsIndex.ts) | the two above, composed |
-| Protocol gate | [`protocolVersion.ts`](./src/dash/protocolVersion.ts) | `sdk.system.status` |
+| Network status | [`protocolVersion.ts`](./src/dash/protocolVersion.ts) | `sdk.system.status` |
 | List / reprice / delist | [`setPrice.ts`](./src/dash/setPrice.ts) | `sdk.documents.setPrice` |
 | Buy | [`purchaseName.ts`](./src/dash/purchaseName.ts) | `sdk.documents.purchase` |
 | Transfer | [`transferName.ts`](./src/dash/transferName.ts) | `sdk.documents.transfer` |
@@ -111,7 +114,9 @@ Pull requests and pushes affecting this app or the shared SDK core run the dedic
 
 ## Limitations
 
-- **Mainnet is read-only, and has no history.** Mainnet runs protocol v12, so every write is gated off. The Document History contract is created by the v13 upgrade and does not exist there yet, so listings, activity, and sales stats are unavailable too — name search, lookup, and portfolio still work. All of it lights up on its own once mainnet activates v13; no code change needed.
+- **Mainnet remains read-only in this example.** Mainnet now meets the protocol
+  requirement and has Document History, but credential entry stays disabled
+  pending a separate production safety review.
 - **No fee estimates.** evo-sdk 4.1.0 exposes no fee-estimation or dry-run method, so any figure would be invented. Affordability is checked against the asking price; Platform rejects a genuinely insufficient balance.
 - **No transaction IDs.** The write methods resolve `void` and expose no state-transition hash. Failures show the real protocol error instead of a fabricated ID or spend claim.
 - **No registration.** That needs the preorder/commit flow plus contested-name voting — a substantial feature, not a button.

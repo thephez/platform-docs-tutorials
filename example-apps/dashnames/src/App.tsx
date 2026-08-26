@@ -42,7 +42,6 @@ import { ManageListingModal } from "./components/ManageListingModal";
 import { LoginModal } from "./components/LoginModal";
 import { MyNamesView } from "./components/MyNamesView";
 import { NameDetailView } from "./components/NameDetailView";
-import { ProtocolGateBanner } from "./components/ProtocolGateBanner";
 import { SettingsView } from "./components/SettingsView";
 import { TransferModal } from "./components/TransferModal";
 
@@ -130,8 +129,8 @@ function Shell() {
   );
 
   const stale = isStale(lastSyncedAt, now);
-  const canWrite = Boolean(keyManager && identityId && protocol.salesEnabled);
-  const canOfferBuy = protocol.salesEnabled;
+  const canWrite = Boolean(keyManager && identityId);
+  const canOfferBuy = true;
 
   const navigateSettings = useCallback((behavior: "open" | "toggle") => {
     setView((current) => {
@@ -252,7 +251,6 @@ function Shell() {
         documentTypeName: DOMAIN_DOCUMENT_TYPE,
         documentId: listing.documentId,
         price,
-        salesEnabled: protocol.salesEnabled,
         log: consoleLogger,
       });
       if (result.ok) {
@@ -265,15 +263,7 @@ function Shell() {
       }
       return result;
     },
-    [
-      sdk,
-      keyManager,
-      protocol.salesEnabled,
-      listingsState,
-      session,
-      myNames,
-      refresh,
-    ],
+    [sdk, keyManager, listingsState, session, myNames, refresh],
   );
 
   const handleSetPrice = useCallback(
@@ -288,7 +278,6 @@ function Shell() {
         documentTypeName: DOMAIN_DOCUMENT_TYPE,
         documentId: manageTarget.documentId,
         price: credits,
-        salesEnabled: protocol.salesEnabled,
         log: consoleLogger,
       });
       setWriteBusy(false);
@@ -313,7 +302,6 @@ function Shell() {
       sdk,
       keyManager,
       manageTarget,
-      protocol.salesEnabled,
       revalidate,
       listingsState,
       myNames,
@@ -333,7 +321,6 @@ function Shell() {
         documentTypeName: DOMAIN_DOCUMENT_TYPE,
         documentId: transferTarget.documentId,
         recipientId,
-        salesEnabled: protocol.salesEnabled,
         log: consoleLogger,
       });
       setWriteBusy(false);
@@ -348,15 +335,7 @@ function Shell() {
       void myNames.refresh();
       void refresh();
     },
-    [
-      sdk,
-      keyManager,
-      transferTarget,
-      protocol.salesEnabled,
-      listingsState,
-      myNames,
-      refresh,
-    ],
+    [sdk, keyManager, transferTarget, listingsState, myNames, refresh],
   );
 
   const handleRecipientChange = useCallback(
@@ -414,12 +393,6 @@ function Shell() {
         onIdentityClick={() =>
           identityId ? navigateSettings("toggle") : openLogin()
         }
-      />
-
-      <ProtocolGateBanner
-        protocol={protocol}
-        network={network}
-        onSwitchNetwork={handleNetworkChange}
       />
 
       <main style={{ flex: 1 }}>

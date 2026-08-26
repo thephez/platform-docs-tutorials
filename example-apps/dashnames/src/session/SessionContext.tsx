@@ -1,5 +1,5 @@
 /**
- * Session provider: SDK connection, optional sign-in, protocol gate, balance.
+ * Session provider: SDK connection, optional sign-in, network status, balance.
  *
  * SECRETS: the mnemonic is a `login()` parameter that flows into the
  * IdentityKeyManager closure and nowhere else. It is never held in state, never
@@ -75,7 +75,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const sdk = (await core.createClient(network)) as unknown as DashSdk;
       if (connectionId.current !== id) return;
 
-      // Fail closed: if the status read throws, sales stay disabled.
+      // Status is informational; a failed read must not fail the connection.
       let protocol = UNKNOWN_PROTOCOL_STATUS;
       try {
         protocol = await fetchProtocolStatus({ sdk });
