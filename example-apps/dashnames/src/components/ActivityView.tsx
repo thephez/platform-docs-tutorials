@@ -7,6 +7,7 @@
  */
 import {
   activityKind,
+  isSelfTransfer,
   type ActivityKind,
   type HistoryEvent,
 } from "../dash/listingTypes";
@@ -192,6 +193,7 @@ export function ActivityView({
                 </div>
                 {group.events.map((event) => {
                   const kind = activityKind(event);
+                  const selfTransfer = isSelfTransfer(event);
                   const showAmount =
                     (kind === "SALE" || kind === "LISTED") &&
                     event.price != null;
@@ -237,17 +239,32 @@ export function ActivityView({
                             />
                           </>
                         ) : kind === "TRANSFER" ? (
-                          <>
-                            <IdentityLink
-                              id={event.ownerId}
-                              onOpen={onOpenIdentity}
-                            />{" "}
-                            →{" "}
-                            <IdentityLink
-                              id={event.toIdentityId}
-                              onOpen={onOpenIdentity}
-                            />
-                          </>
+                          selfTransfer ? (
+                            <>
+                              <IdentityLink
+                                id={event.ownerId}
+                                onOpen={onOpenIdentity}
+                              />{" "}
+                              <span
+                                className="self-transfer-marker"
+                                title="Some wallets delist by transferring a name to its current owner. This clears any active listing."
+                              >
+                                to self
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <IdentityLink
+                                id={event.ownerId}
+                                onOpen={onOpenIdentity}
+                              />{" "}
+                              →{" "}
+                              <IdentityLink
+                                id={event.toIdentityId}
+                                onOpen={onOpenIdentity}
+                              />
+                            </>
+                          )
                         ) : (
                           <IdentityLink
                             id={event.ownerId}
@@ -268,8 +285,8 @@ export function ActivityView({
       </div>
 
       <p className="table-footnote">
-        A delisting is a zero-price update; sales and transfers clear the price
-        without writing one, so they appear under their own event type.
+        A delisting is a zero-price update; sales and transfers clear any active
+        listing without writing one, so they appear under their own event type.
       </p>
     </>
   );

@@ -2238,6 +2238,20 @@ h1 {
   color: var(--text-muted);
 }
 
+.self-transfer-marker {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--fill-chip);
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
 .amount-dash {
   font-weight: 500;
   font-size: 12px;

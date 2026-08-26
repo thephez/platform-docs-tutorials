@@ -5,7 +5,11 @@
  * Dot colors: listed/price-update `#35b0ff`, sale `#3ddb95`,
  * transfer/registration `#4a637d`.
  */
-import { activityKind, type HistoryEvent } from "../dash/listingTypes";
+import {
+  activityKind,
+  isSelfTransfer,
+  type HistoryEvent,
+} from "../dash/listingTypes";
 import { formatBlock, formatDash, relativeTime } from "../lib/format";
 import { IdentityLink } from "./IdentityLink";
 
@@ -31,6 +35,7 @@ function title(event: HistoryEvent): string {
     return `Listed for ${formatDash(event.price)} DASH`;
   }
   if (kind === "DELISTED") return "Listing removed";
+  if (isSelfTransfer(event)) return "Transferred to self";
   return "Transferred";
 }
 
@@ -52,11 +57,25 @@ function Detail({
     );
   }
   if (kind === "TRANSFER") {
+    if (isSelfTransfer(event)) {
+      return (
+        <>
+          <IdentityLink id={event.ownerId} onOpen={onOpenIdentity} /> ·{" "}
+          <span
+            className="self-transfer-marker"
+            title="Some wallets delist by transferring a name to its current owner. This clears any active listing."
+          >
+            to self
+          </span>{" "}
+          · clears any active listing
+        </>
+      );
+    }
     return (
       <>
         <IdentityLink id={event.ownerId} onOpen={onOpenIdentity} /> →{" "}
-        <IdentityLink id={event.toIdentityId} onOpen={onOpenIdentity} />·
-        listing cleared by transfer
+        <IdentityLink id={event.toIdentityId} onOpen={onOpenIdentity} /> ·
+        clears any active listing
       </>
     );
   }

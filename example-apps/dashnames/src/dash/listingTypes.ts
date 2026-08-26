@@ -83,3 +83,13 @@ export function activityKind(event: HistoryEvent): ActivityKind {
   // A zero-price update is a delisting; a positive one is a listing/reprice.
   return event.price != null && event.price > 0n ? "LISTED" : "DELISTED";
 }
+
+/** True only for a transfer whose complete, non-empty identity IDs match. */
+export function isSelfTransfer(event: HistoryEvent): boolean {
+  return Boolean(
+    event.type === "transfer" &&
+    event.ownerId &&
+    event.toIdentityId &&
+    event.ownerId === event.toIdentityId,
+  );
+}

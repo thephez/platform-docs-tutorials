@@ -16,27 +16,29 @@
  *   node check-mainnet-activity.mjs splawik21
  *   node check-mainnet-activity.mjs splawik21 --network testnet
  */
-import { createClient } from '../../setupDashClient-core.mjs';
+import { createClient } from "../../setupDashClient-core.mjs";
 
-const DPNS_CONTRACT_ID = 'GWRSAVFMjXx8HpQFaNJMqBV7MBgMK4br5UESsB4S31Ec';
-const HISTORY_CONTRACT_ID = '6voHRaoiPcfmMhbqCA9dixH98xcgPQ9UEcuaXjpVu3LD';
-const STREAMS = ['priceUpdate', 'purchase', 'transfer'];
+const DPNS_CONTRACT_ID = "GWRSAVFMjXx8HpQFaNJMqBV7MBgMK4br5UESsB4S31Ec";
+const HISTORY_CONTRACT_ID = "6voHRaoiPcfmMhbqCA9dixH98xcgPQ9UEcuaXjpVu3LD";
+const STREAMS = ["priceUpdate", "purchase", "transfer"];
 const CREDITS_PER_DASH = 100_000_000_000n;
 
 const argv = process.argv.slice(2);
-const networkFlag = argv.indexOf('--network');
-const network = networkFlag !== -1 ? argv[networkFlag + 1] : 'mainnet';
-const inputLabel = (argv.find((a) => !a.startsWith('--') && a !== network) ?? 'splawik21')
-  .replace(/\.dash$/i, '')
+const networkFlag = argv.indexOf("--network");
+const network = networkFlag !== -1 ? argv[networkFlag + 1] : "mainnet";
+const inputLabel = (
+  argv.find((a) => !a.startsWith("--") && a !== network) ?? "splawik21"
+)
+  .replace(/\.dash$/i, "")
   .trim()
   .toLowerCase();
 
 // ---------------------------------------------------------------- base58
 
-const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
 function bytesToBase58(bytes) {
-  if (bytes.length === 0) return '';
+  if (bytes.length === 0) return "";
   let zeros = 0;
   while (zeros < bytes.length && bytes[zeros] === 0) zeros += 1;
   const digits = [];
@@ -52,7 +54,7 @@ function bytesToBase58(bytes) {
       carry = (carry / 58) | 0;
     }
   }
-  let out = '1'.repeat(zeros);
+  let out = "1".repeat(zeros);
   for (let i = digits.length - 1; i >= 0; i -= 1) out += BASE58[digits[i]];
   return out;
 }
@@ -61,20 +63,21 @@ function bytesToBase58(bytes) {
 
 function readId(value) {
   if (value == null) return null;
-  if (typeof value === 'string') return value;
+  if (typeof value === "string") return value;
   if (value instanceof Uint8Array) return bytesToBase58(value);
   if (Array.isArray(value)) return bytesToBase58(Uint8Array.from(value));
-  if (typeof value === 'object') {
+  if (typeof value === "object") {
     const s = String(value);
-    return s && s !== '[object Object]' ? s : null;
+    return s && s !== "[object Object]" ? s : null;
   }
   return null;
 }
 
 function readBigInt(value) {
-  if (typeof value === 'bigint') return value;
-  if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.trunc(value));
-  if (typeof value === 'string' && /^\d+$/.test(value)) return BigInt(value);
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number" && Number.isFinite(value))
+    return BigInt(Math.trunc(value));
+  if (typeof value === "string" && /^\d+$/.test(value)) return BigInt(value);
   return null;
 }
 
@@ -95,20 +98,21 @@ function toArray(results) {
   if (results == null) return [];
   if (Array.isArray(results)) return results;
   if (results instanceof Map) return [...results.values()].filter(Boolean);
-  if (typeof results === 'object') return Object.values(results).filter(Boolean);
+  if (typeof results === "object")
+    return Object.values(results).filter(Boolean);
   return [];
 }
 
 function formatCredits(credits) {
-  if (credits == null) return '—';
+  if (credits == null) return "—";
   const dash = Number(credits) / Number(CREDITS_PER_DASH);
-  return `${credits.toString()} credits (${dash.toLocaleString('en-US', {
+  return `${credits.toString()} credits (${dash.toLocaleString("en-US", {
     maximumFractionDigits: 8,
   })} DASH)`;
 }
 
 function stamp(ms) {
-  if (ms == null) return 'unknown';
+  if (ms == null) return "unknown";
   return new Date(Number(ms)).toISOString();
 }
 
@@ -122,32 +126,42 @@ const sdk = await createClient(network);
 // consensus.
 const label = await sdk.dpns.convertToHomographSafe(inputLabel);
 
-console.log(`\n=== dashnames activity check — ${network} — "${inputLabel}.dash" ===\n`);
+console.log(
+  `\n=== dashnames activity check — ${network} — "${inputLabel}.dash" ===\n`,
+);
 if (label !== inputLabel) {
-  console.log(`[0] Homograph fold: "${inputLabel}" -> normalizedLabel "${label}"\n`);
+  console.log(
+    `[0] Homograph fold: "${inputLabel}" -> normalizedLabel "${label}"\n`,
+  );
 }
 
 // 1. Protocol version --------------------------------------------------
 let activeVersion = null;
 try {
   const status = await sdk.system.status();
-  const json = typeof status?.toJSON === 'function' ? status.toJSON() : status;
+  const json = typeof status?.toJSON === "function" ? status.toJSON() : status;
   const drive = json?.version?.protocol?.drive ?? {};
   activeVersion = drive.current ?? null;
-  console.log('[1] Protocol version');
-  console.log(`    version.protocol.drive.current : ${drive.current}   <- the gate`);
-  console.log(`    version.protocol.drive.latest  : ${drive.latest}`);
-  console.log(`    software.drive                 : ${json?.version?.software?.drive}`);
-  console.log(`    block height                   : ${json?.chain?.latestBlockHeight}`);
+  console.log("[1] Protocol version");
   console.log(
-    `    => history contract expected to exist: ${(drive.current ?? 0) >= 13 ? 'YES' : 'NO (pre-v13)'}\n`,
+    `    version.protocol.drive.current : ${drive.current}   <- the gate`,
+  );
+  console.log(`    version.protocol.drive.latest  : ${drive.latest}`);
+  console.log(
+    `    software.drive                 : ${json?.version?.software?.drive}`,
+  );
+  console.log(
+    `    block height                   : ${json?.chain?.latestBlockHeight}`,
+  );
+  console.log(
+    `    => history contract expected to exist: ${(drive.current ?? 0) >= 13 ? "YES" : "NO (pre-v13)"}\n`,
   );
 } catch (e) {
   console.log(`[1] Protocol version — FAILED: ${e.message}\n`);
 }
 
 // 2. Does the History contract exist here? ------------------------------
-console.log('[2] Document History contract');
+console.log("[2] Document History contract");
 let historyExists = false;
 try {
   const contract = await sdk.contracts.fetch(HISTORY_CONTRACT_ID);
@@ -161,21 +175,21 @@ try {
 }
 
 // 3. The DPNS domain document ------------------------------------------
-console.log('[3] DPNS domain document');
+console.log("[3] DPNS domain document");
 let domainDocId = null;
 let domainOwner = null;
 try {
   const domains = toArray(
     await sdk.documents.query({
       dataContractId: DPNS_CONTRACT_ID,
-      documentTypeName: 'domain',
+      documentTypeName: "domain",
       where: [
-        ['normalizedParentDomainName', '==', 'dash'],
-        ['normalizedLabel', '==', label],
+        ["normalizedParentDomainName", "==", "dash"],
+        ["normalizedLabel", "==", label],
       ],
       // Required: the index matcher reserves the order-by field from the back
       // of `parentNameAndLabel`. Without it the query matches nothing silently.
-      orderBy: [['normalizedLabel', 'asc']],
+      orderBy: [["normalizedLabel", "asc"]],
       limit: 1,
     }),
   );
@@ -186,8 +200,10 @@ try {
     // "my query was shaped wrong".
     try {
       const resolved = await sdk.dpns.resolveName(`${inputLabel}.dash`);
-      console.log(`    !! but sdk.dpns.resolveName says it EXISTS -> ${resolved}`);
-      console.log('    => the query above is wrong, not the data\n');
+      console.log(
+        `    !! but sdk.dpns.resolveName says it EXISTS -> ${resolved}`,
+      );
+      console.log("    => the query above is wrong, not the data\n");
     } catch (e) {
       console.log(`    resolveName agrees it is absent: ${e.message}\n`);
     }
@@ -200,22 +216,28 @@ try {
     console.log(`    documentId : ${domainDocId}`);
     console.log(`    owner      : ${domainOwner}`);
     console.log(`    label      : ${p.label}`);
-    console.log(`    records    : ${readId(p.records?.identity) ?? JSON.stringify(p.records)}`);
+    console.log(
+      `    records    : ${readId(p.records?.identity) ?? JSON.stringify(p.records)}`,
+    );
     console.log(`    revision   : ${doc.revision}`);
-    console.log(`    $price     : ${price == null ? 'not set (NOT listed for sale)' : formatCredits(price)}`);
-    console.log('');
+    console.log(
+      `    $price     : ${price == null ? "not set (NOT listed for sale)" : formatCredits(price)}`,
+    );
+    console.log("");
   }
 } catch (e) {
   console.log(`    => query FAILED: ${e.message}\n`);
 }
 
 // 4. Raw history records for this document ------------------------------
-console.log('[4] History records (raw, per stream)');
+console.log("[4] History records (raw, per stream)");
 if (!historyExists) {
-  console.log('    skipped — history contract does not exist on this network');
-  console.log('    => ANY activity rows shown in the app for this network are NOT from here\n');
+  console.log("    skipped — history contract does not exist on this network");
+  console.log(
+    "    => ANY activity rows shown in the app for this network are NOT from here\n",
+  );
 } else if (!domainDocId) {
-  console.log('    skipped — no domain document to look up\n');
+  console.log("    skipped — no domain document to look up\n");
 } else {
   for (const type of STREAMS) {
     try {
@@ -224,10 +246,10 @@ if (!historyExists) {
           dataContractId: HISTORY_CONTRACT_ID,
           documentTypeName: type,
           where: [
-            ['dataContractId', '==', DPNS_CONTRACT_ID],
-            ['documentId', '==', domainDocId],
+            ["dataContractId", "==", DPNS_CONTRACT_ID],
+            ["documentId", "==", domainDocId],
           ],
-          orderBy: [['$createdAt', 'asc']],
+          orderBy: [["$createdAt", "asc"]],
           limit: 100,
         }),
       );
@@ -238,17 +260,22 @@ if (!historyExists) {
         const createdAt = readBigInt(doc.createdAt ?? p.$createdAt);
         console.log(`      - $id        : ${docId(doc)}`);
         console.log(`        createdAt  : ${stamp(createdAt)}`);
-        console.log(`        block      : ${doc.createdAtBlockHeight ?? p.$createdAtBlockHeight ?? '—'}`);
+        console.log(
+          `        block      : ${doc.createdAtBlockHeight ?? p.$createdAtBlockHeight ?? "—"}`,
+        );
         console.log(`        ownerId    : ${readId(doc.ownerId)}`);
-        if (p.price !== undefined) console.log(`        price      : ${formatCredits(price)}`);
-        if (p.sellerId !== undefined) console.log(`        sellerId   : ${readId(p.sellerId)}`);
-        if (p.toIdentityId !== undefined) console.log(`        toIdentity : ${readId(p.toIdentityId)}`);
+        if (p.price !== undefined)
+          console.log(`        price      : ${formatCredits(price)}`);
+        if (p.sellerId !== undefined)
+          console.log(`        sellerId   : ${readId(p.sellerId)}`);
+        if (p.toIdentityId !== undefined)
+          console.log(`        toIdentity : ${readId(p.toIdentityId)}`);
       }
     } catch (e) {
       console.log(`    ${type}: query FAILED — ${e.message}`);
     }
   }
-  console.log('');
+  console.log("");
 }
 
-console.log('=== done ===\n');
+console.log("=== done ===\n");
