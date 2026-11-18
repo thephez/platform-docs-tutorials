@@ -2,6 +2,9 @@ import { requireId } from "./ids";
 import type { ReadSdk, WhereClause } from "./types";
 import { toDocumentArray, type DocumentHandle } from "../lib/safeDoc";
 
+// TODO(milestone 2): move rating reads/writes to the v3 registry's `appReview`
+// (REVIEW_DOCUMENT_TYPE in contract.ts). Until the testnet default switches,
+// they target the current registry, whose rating type is `appRating`.
 export const RATING_DOCUMENT_TYPE = "appRating";
 export const STAR_VALUES = [1, 2, 3, 4, 5] as const;
 export type Stars = (typeof STAR_VALUES)[number];
