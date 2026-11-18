@@ -1,11 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSession } from "../session/useSession";
 import {
   listRatings,
   ownRating,
   ratingSummary,
-  RATING_PAGE_SIZE,
   STAR_VALUES,
   type RatingRecord,
   type RatingSort,
@@ -272,17 +271,34 @@ export function AppRatings({
   const summaryError = summaryCurrent?.error ?? "";
   const own = summaryCurrent?.own;
 
+  // The list is server-ordered and server-paged: the first page loads with the
+  // scope, "Load more" appends the next one from the page cursor.
   const listScope = `${registryId}:${contractId}:${sort}:${starsFilter ?? ""}:${refresh}`;
   const [listState, setListState] = useState<{
     scope: string;
     ratings: RatingRecord[];
+    cursor?: string;
     error: string;
-  }>({ scope: "", ratings: [], error: "" });
-  const [revealed, setRevealed] = useState(RATING_PAGE_SIZE);
+    /** Which first-page load produced this list (see listGeneration). */
+    load: number;
+  }>({ scope: "", ratings: [], error: "", load: 0 });
   const listCurrent = listState.scope === listScope ? listState : undefined;
   const ratings = listCurrent?.ratings ?? [];
   const listError = listCurrent?.error ?? "";
   const listBusy = Boolean(connection && registryId) && !listCurrent;
+  const cursor = listCurrent?.cursor;
+  // Bumped whenever the first page (re)loads, so a "Load more" response from
+  // an earlier load — even one with an identical scope string — is dropped.
+  const listGeneration = useRef(0);
+  const [more, setMore] = useState<{
+    load: number;
+    busy: boolean;
+    error: string;
+  }>({ load: -1, busy: false, error: "" });
+  const moreCurrent =
+    listCurrent && more.load === listCurrent.load ? more : undefined;
+  const moreBusy = moreCurrent?.busy ?? false;
+  const moreError = moreCurrent?.error ?? "";
 
   useEffect(() => {
     if (!connection || !registryId) return;
@@ -316,13 +332,20 @@ export function AppRatings({
   useEffect(() => {
     if (!connection || !registryId) return;
     let active = true;
+    const load = ++listGeneration.current;
     void listRatings(connection.sdk, registryId, contractId, {
       sort,
       stars: starsFilter,
     })
-      .then((loaded) => {
+      .then((page) => {
         if (active)
-          setListState({ scope: listScope, ratings: loaded, error: "" });
+          setListState({
+            scope: listScope,
+            ratings: page.ratings,
+            cursor: page.cursor,
+            error: "",
+            load,
+          });
       })
       .catch((caught) => {
         if (active)
@@ -330,12 +353,49 @@ export function AppRatings({
             scope: listScope,
             ratings: [],
             error: errorMessage(caught),
+            load,
           });
       });
     return () => {
       active = false;
     };
   }, [connection, registryId, contractId, sort, starsFilter, listScope]);
+
+  async function loadMore() {
+    if (!connection || !registryId || !listCurrent || !cursor || moreBusy)
+      return;
+    const { load } = listCurrent;
+    setMore({ load, busy: true, error: "" });
+    try {
+      const page = await listRatings(connection.sdk, registryId, contractId, {
+        sort,
+        stars: starsFilter,
+        cursor,
+      });
+      if (load !== listGeneration.current) return;
+      setListState((previous) =>
+        previous.load !== load
+          ? previous
+          : {
+              ...previous,
+              // Keyed by ID: a rating edited between pages can't show twice.
+              ratings: [
+                ...new Map(
+                  [...previous.ratings, ...page.ratings].map((rating) => [
+                    rating.id,
+                    rating,
+                  ]),
+                ).values(),
+              ],
+              cursor: page.cursor,
+            },
+      );
+      setMore({ load, busy: false, error: "" });
+    } catch (caught) {
+      if (load === listGeneration.current)
+        setMore({ load, busy: false, error: errorMessage(caught) });
+    }
+  }
 
   if (!registryId) return null;
   const count = summary?.count ?? 0n;
@@ -346,10 +406,13 @@ export function AppRatings({
         0n,
       )
     : 0n;
-  const matching = writtenOnly
+  const visible = writtenOnly
     ? ratings.filter((rating) => Boolean(rating.body))
     : ratings;
-  const visible = matching.slice(0, revealed);
+  // `own` is scoped to `refresh`, so it is undefined again while ratings
+  // reload after a save: the editor stays locked (and unmounted) until the
+  // saved rating is re-read, and can't open on — or be reseeded from — the
+  // pre-save copy, which would drop edits typed meanwhile.
   const canWrite =
     Boolean(identityId && session.keyManager) && own !== undefined;
   const changed = (message: string) => {
@@ -524,7 +587,9 @@ export function AppRatings({
           {starsFilter !== undefined
             ? `No ${starsFilter}-star ratings yet.`
             : writtenOnly && ratings.length
-              ? "No written reviews on this page."
+              ? cursor
+                ? "No written reviews loaded yet."
+                : "No written reviews yet."
               : "No ratings yet. Be the first to rate this app."}
         </p>
       )}
@@ -538,13 +603,19 @@ export function AppRatings({
           />
         ))}
       </ul>
-      {matching.length > revealed && (
+      {moreError && (
+        <p className="error" role="alert">
+          Could not load more ratings: {moreError}
+        </p>
+      )}
+      {cursor && (
         <button
           type="button"
           className="open-pill"
-          onClick={() => setRevealed((value) => value + RATING_PAGE_SIZE)}
+          disabled={moreBusy}
+          onClick={() => void loadMore()}
         >
-          Show more ({matching.length - revealed} more)
+          {moreBusy ? "Loading…" : "Load more"}
         </button>
       )}
       {editorOpen &&
