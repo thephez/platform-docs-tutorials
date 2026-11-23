@@ -123,6 +123,8 @@ interface StubOptions {
   documents?: unknown;
   query?: (args: { where?: unknown[][] }) => Promise<unknown>;
   contractKeys?: StubKey[];
+  /** Block time the proved identity read reports. */
+  chainTimeMs?: bigint;
 }
 
 function stubSdk(options: StubOptions = {}) {
@@ -140,7 +142,10 @@ function stubSdk(options: StubOptions = {}) {
     identities: {
       fetchWithProof: vi.fn(async (id: string) => ({
         data: identities[id] ? { publicKeys: identities[id] } : undefined,
-        metadata: { timeMs: 0n, protocolVersion: 14 },
+        metadata: {
+          timeMs: options.chainTimeMs ?? BigInt(CHAIN_NOW),
+          protocolVersion: 14,
+        },
       })),
       keysRemainingBudgets: vi.fn(
         async (_id: string, keyIds: number[]) =>
@@ -193,14 +198,25 @@ function byOwner<T extends { ownerId: unknown }>(docs: T[]): T[] {
   });
 }
 
-/** A trigger that advances the fake clock instead of sleeping. */
-function clockTrigger(clock: { t: number }, stepMs = 2_000) {
+/** A trigger that advances the fake clock by each delay instead of sleeping. */
+function clockTrigger(clock: { t: number; waits?: number[] }) {
   return {
     fire() {},
-    async wait() {
-      clock.t += stepMs;
+    async wait(ms: number) {
+      clock.waits?.push(ms);
+      clock.t += ms;
     },
   } as unknown as PollTrigger;
+}
+
+function spamDoc(label: string) {
+  return {
+    ownerId: encodeBase58(seed(label)),
+    properties: {
+      walletEphemeralPubKey: new Uint8Array(33),
+      encryptedPayload: new Uint8Array(60),
+    },
+  };
 }
 
 describe("readChainClock", () => {
@@ -620,27 +636,148 @@ describe("awaitWalletAnswer", () => {
     );
   });
 
-  it("gives up once the request has expired", async () => {
-    const req = newRequest();
-    const { asSdk } = stubSdk();
+  it("gives up before reading once the request has expired", async () => {
+    const req = newRequest(OWNER);
+    const doc = await answerDoc(req, OWNER, seed("granted key"));
+    const { sdk, asSdk } = stubSdk({
+      identities: { [OWNER]: [grantKey(seed("granted key"))] },
+      budgets: { 3: 1n },
+      documents: [doc],
+    });
 
     await expect(
       awaitWalletAnswer(asSdk, req, {
         now: () => CREATED_AT + 10 * 60_000,
       }),
     ).rejects.toBeInstanceOf(RequestExpiredError);
+    expect(sdk.documents.query).not.toHaveBeenCalled();
     expect(req.appEphemeralPrivateKey.every((b) => b === 0)).toBe(true);
+  });
+
+  it("rejects an answer that only becomes readable after the deadline", async () => {
+    const req = newRequest(OWNER);
+    const doc = await answerDoc(req, OWNER, seed("granted key"));
+    const clock = { t: req.expiresAt - 1_000 };
+    const { sdk, asSdk } = stubSdk({
+      identities: { [OWNER]: [grantKey(seed("granted key"))] },
+      budgets: { 3: 1n },
+      query: async () => (clock.t >= req.expiresAt ? [doc] : []),
+    });
+
+    await expect(
+      awaitWalletAnswer(asSdk, req, {
+        now: () => clock.t,
+        trigger: clockTrigger(clock),
+      }),
+    ).rejects.toBeInstanceOf(RequestExpiredError);
+    expect(sdk.documents.query).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns an unhinted answer only on a complete round after the settle window", async () => {
+    const req = newRequest();
+    const doc = await answerDoc(req, OWNER, seed("granted key"));
+    let round = 0;
+    const { sdk, asSdk } = stubSdk({
+      identities: { [OWNER]: [grantKey(seed("granted key"))] },
+      budgets: { 3: 1n },
+      query: async () => {
+        round += 1;
+        if (round === 2 || round === 3) throw new Error("node unavailable");
+        return [doc];
+      },
+    });
+    const clock = { t: CREATED_AT, waits: [] as number[] };
+    const statuses: WalletPollStatus[] = [];
+
+    const answer = await awaitWalletAnswer(asSdk, req, {
+      settleMs: 3_000,
+      now: () => clock.t,
+      trigger: clockTrigger(clock),
+      onStatus: (s) => statuses.push(s),
+    });
+
+    expect(answer.identityId).toBe(OWNER);
+    expect(sdk.documents.query).toHaveBeenCalledTimes(4);
+    expect(statuses).toEqual([
+      "answered",
+      "incomplete-read",
+      "incomplete-read",
+      "answered",
+    ]);
+    expect(clock.waits).toEqual([2_000, 2_000, 2_000]);
+  });
+
+  it("treats a failed identity read as an incomplete round", async () => {
+    const req = newRequest(OWNER);
+    const doc = await answerDoc(req, OWNER, seed("granted key"));
+    const { sdk, asSdk } = stubSdk({
+      identities: { [OWNER]: [grantKey(seed("granted key"))] },
+      budgets: { 3: 1n },
+      documents: [doc],
+    });
+    sdk.identities.fetchWithProof.mockRejectedValueOnce(new Error("timeout"));
+    const clock = { t: CREATED_AT };
+    const statuses: WalletPollStatus[] = [];
+
+    const answer = await awaitWalletAnswer(asSdk, req, {
+      now: () => clock.t,
+      trigger: clockTrigger(clock),
+      onStatus: (s) => statuses.push(s),
+    });
+
+    expect(answer.identityId).toBe(OWNER);
+    expect(statuses).toEqual(["incomplete-read", "answered"]);
+  });
+
+  it("waits the protocol delay after a failed read", async () => {
+    const req = newRequest(OWNER);
+    const doc = await answerDoc(req, OWNER, seed("granted key"));
+    let round = 0;
+    const { asSdk } = stubSdk({
+      identities: { [OWNER]: [grantKey(seed("granted key"))] },
+      budgets: { 3: 1n },
+      query: async () => {
+        round += 1;
+        if (round < 3) throw new Error("node unavailable");
+        return [doc];
+      },
+    });
+    const clock = { t: CREATED_AT + 59_000, waits: [] as number[] };
+
+    const answer = await awaitWalletAnswer(asSdk, req, {
+      now: () => clock.t,
+      trigger: clockTrigger(clock),
+    });
+
+    expect(answer.identityId).toBe(OWNER);
+    expect(clock.waits).toEqual([2_000, 4_000]);
+  });
+
+  it("caps distinct answering identities across rounds", async () => {
+    const req = newRequest();
+    let round = 0;
+    const { sdk, asSdk } = stubSdk({
+      query: async () => {
+        round += 1;
+        return [spamDoc(`republished ${round}`)];
+      },
+    });
+    const clock = { t: CREATED_AT };
+
+    await expect(
+      awaitWalletAnswer(asSdk, req, {
+        now: () => clock.t,
+        trigger: clockTrigger(clock),
+      }),
+    ).rejects.toBeInstanceOf(TooManyAnswersError);
+    expect(sdk.documents.query).toHaveBeenCalledTimes(21);
   });
 
   it("stops when the read is truncated by spam", async () => {
     const req = newRequest();
-    const docs = Array.from({ length: 21 }, (_, i) => ({
-      ownerId: encodeBase58(seed(`spam ${String(i).padStart(2, "0")}`)),
-      properties: {
-        walletEphemeralPubKey: new Uint8Array(33),
-        encryptedPayload: new Uint8Array(60),
-      },
-    }));
+    const docs = Array.from({ length: 21 }, (_, i) =>
+      spamDoc(`spam ${String(i).padStart(2, "0")}`),
+    );
     byOwner(docs);
     const { asSdk } = stubSdk({
       query: async (args) => {
@@ -699,9 +836,19 @@ function testGrant(privateKey: Uint8Array): AppConnectGrant {
 }
 
 describe("loginWithWalletAnswer", () => {
+  const FRESH_EXPIRES = GRANT_EXPIRES - 86_400_000;
+
   it("logs in with the granted key as a WIF and wipes it", async () => {
     const privateKey = seed("granted key").slice();
-    const { asSdk } = stubSdk();
+    const { sdk, asSdk } = stubSdk({
+      identities: {
+        [OWNER]: [
+          masterKey,
+          grantKey(seed("granted key"), { expiresAt: BigInt(FRESH_EXPIRES) }),
+        ],
+      },
+      budgets: { 3: 55n },
+    });
 
     const login = await loginWithWalletAnswer(asSdk, {
       identityId: OWNER,
@@ -717,20 +864,95 @@ describe("loginWithWalletAnswer", () => {
       identityKey: { keyId: 3 },
       signer: { kind: "signer" },
     });
+    expect(sdk.identities.fetchWithProof).toHaveBeenCalledWith(OWNER);
+    expect(sdk.identities.keysRemainingBudgets).toHaveBeenCalledWith(
+      OWNER,
+      [3],
+    );
     expect(login.grant).toEqual({
       keyId: 3,
       contractId: CONTRACT_ID,
       totalBudget: DEFAULT_BUDGET_CREDITS,
-      remainingBudget: 7n,
-      expiresAt: GRANT_EXPIRES,
+      remainingBudget: 55n,
+      expiresAt: FRESH_EXPIRES,
     });
+    expect(privateKey.every((b) => b === 0)).toBe(true);
+  });
+
+  it.each([
+    {
+      name: "a key that now expires within the hour",
+      reason: "key-expired",
+      keys: [grantKey(seed("granted key"))],
+      budgets: { 3: 55n },
+      chainTimeMs: BigInt(GRANT_EXPIRES - 60 * 60_000),
+    },
+    {
+      name: "a spent allowance",
+      reason: "budget-exhausted",
+      keys: [grantKey(seed("granted key"))],
+      budgets: { 3: 0n },
+    },
+    {
+      name: "an unreadable allowance",
+      reason: "budget-unknown",
+      keys: [grantKey(seed("granted key"))],
+      budgets: {},
+    },
+    {
+      name: "a disabled key",
+      reason: "key-disabled",
+      keys: [grantKey(seed("granted key"), { disabledAt: 5n })],
+      budgets: { 3: 55n },
+    },
+    {
+      name: "a key that is gone",
+      reason: "key-disabled",
+      keys: [masterKey],
+      budgets: {},
+    },
+    {
+      name: "a key bound to another contract",
+      reason: "key-unmatched",
+      keys: [
+        grantKey(seed("granted key"), {
+          contractBounds: {
+            contractBoundsType: "singleContract",
+            identifier: OTHER,
+          },
+        }),
+      ],
+      budgets: { 3: 55n },
+    },
+  ])("refuses $name when the user confirms", async (c) => {
+    vi.mocked(loginWithPrivateKey).mockClear();
+    fromBytes.mockClear();
+    const privateKey = seed("granted key").slice();
+    const { asSdk } = stubSdk({
+      identities: { [OWNER]: c.keys },
+      budgets: c.budgets,
+      chainTimeMs: c.chainTimeMs,
+    });
+
+    const error = await loginWithWalletAnswer(asSdk, {
+      identityId: OWNER,
+      grant: testGrant(privateKey),
+    }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(WalletAnswerRefusedError);
+    expect((error as WalletAnswerRefusedError).reason).toBe(c.reason);
+    expect(fromBytes).not.toHaveBeenCalled();
+    expect(loginWithPrivateKey).not.toHaveBeenCalled();
     expect(privateKey.every((b) => b === 0)).toBe(true);
   });
 
   it("wipes the key when the login fails", async () => {
     vi.mocked(loginWithPrivateKey).mockRejectedValueOnce(new Error("nope"));
     const privateKey = seed("granted key").slice();
-    const { asSdk } = stubSdk();
+    const { asSdk } = stubSdk({
+      identities: { [OWNER]: [grantKey(seed("granted key"))] },
+      budgets: { 3: 55n },
+    });
 
     await expect(
       loginWithWalletAnswer(asSdk, {
@@ -777,12 +999,33 @@ describe("classifyWalletWriteError", () => {
     expect(classifyWalletWriteError({ code: 20013 })).toBeNull();
   });
 
-  it("finds the code in the message when there is no numeric code", () => {
+  it("reads a WasmSdkError-shaped object and nested codes", () => {
+    expect(
+      classifyWalletWriteError({ code: 40218, message: "insufficient" }),
+    ).toBe("renew");
+    expect(
+      classifyWalletWriteError({ code: -1, consensusError: { code: 20003 } }),
+    ).toBe("logout");
+    expect(classifyWalletWriteError({ cause: { code: 20016 } })).toBe("renew");
+    expect(
+      classifyWalletWriteError({ code: -1, message: "timeout" }),
+    ).toBeNull();
+  });
+
+  it("finds the code in the message only next to the word code", () => {
     expect(
       classifyWalletWriteError(
         new Error("Identity key 3 budget exhausted (code 20015)"),
       ),
     ).toBe("renew");
+    expect(
+      classifyWalletWriteError(new Error("consensus error code: 20016")),
+    ).toBe("renew");
+    expect(
+      classifyWalletWriteError(
+        new Error("Document revision 20006 does not match the stored one"),
+      ),
+    ).toBeNull();
     expect(classifyWalletWriteError(new Error("timeout"))).toBeNull();
     expect(classifyWalletWriteError(null)).toBeNull();
   });

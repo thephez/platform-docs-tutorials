@@ -149,7 +149,10 @@ export function SettingsPanel({
     trimmedContract.length > 0 &&
     trimmedContract !== (session.contractId ?? "");
   const canRegister = Boolean(
-    session.status === "authenticated" && session.sdk && session.keyManager,
+    session.status === "authenticated" &&
+    session.sdk &&
+    session.keyManager &&
+    !session.walletGrant,
   );
 
   return (
@@ -181,6 +184,13 @@ export function SettingsPanel({
               This browser&apos;s key ran out of allowance or expired, so the
               last write didn&apos;t go through. Renew the connection in DashPay
               to keep writing.
+              <button
+                type="button"
+                onClick={session.dismissWalletNotice}
+                className="ml-2 text-[11px] font-semibold underline underline-offset-2 opacity-80 transition hover:opacity-100"
+              >
+                Dismiss
+              </button>
             </OperationResultNotice>
           )}
           <dl
@@ -278,6 +288,12 @@ export function SettingsPanel({
             Registering deploys a fresh note contract to testnet and switches
             Dashnote to it immediately.
           </p>
+          {session.walletGrant && (
+            <p className="text-[11px] text-ink-4">
+              Registering a contract needs a mnemonic or private-key sign-in; a
+              wallet key only writes notes.
+            </p>
+          )}
           {registerError && (
             <OperationResultNotice tone="error" title="Error">
               {registerError}

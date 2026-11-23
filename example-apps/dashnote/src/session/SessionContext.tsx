@@ -2,7 +2,9 @@ import { toast } from "sonner";
 import {
   createContext,
   useCallback,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -139,6 +141,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [walletGrant, setWalletGrant] = useState<WalletGrant | null>(null);
   const [walletNotice, setWalletNotice] = useState<WalletNotice | null>(null);
 
+  // The grant a late wallet read or write error may still act on; anything
+  // that started under a different identity or key is discarded.
+  const walletKeyRef = useRef<{ identityId: string; keyId: number } | null>(
+    null,
+  );
+  useEffect(() => {
+    walletKeyRef.current =
+      walletGrant && identityId
+        ? { identityId, keyId: walletGrant.keyId }
+        : null;
+  }, [walletGrant, identityId]);
+
   const [activityLog, setActivityLog] = useState<LogEntry[]>([]);
 
   const log = useCallback<Logger>((message, levelOrOptions) => {
@@ -167,28 +181,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clearActivityLog = useCallback(() => setActivityLog([]), []);
-
-  const setContractId = useCallback(
-    (id: string | null) => {
-      const trimmed = id?.trim() ?? "";
-      // Evict the SDK's cached schema for the contract we're leaving so the
-      // next query refetches against the new ID. queries.ts trusts the cache
-      // for normal note operations; this is the one place it can become
-      // stale (user pastes a different ID or registers a fresh contract).
-      const previousId = contractId;
-      if (sdk && previousId && previousId !== trimmed) {
-        void refreshContractCache({ sdk, contractId: previousId });
-      }
-      if (trimmed) {
-        saveContractId(trimmed);
-        setContractIdState(trimmed);
-        return;
-      }
-      clearStoredContractId();
-      setContractIdState(loadStoredContractId());
-    },
-    [sdk, contractId],
-  );
 
   const connect = useCallback(async () => {
     setStatus("connecting");
@@ -476,32 +468,74 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     log("Logged out.");
   }, [sdk, rememberedIdentityId, log]);
 
+  const setContractId = useCallback(
+    (id: string | null) => {
+      const trimmed = id?.trim() ?? "";
+      // Evict the SDK's cached schema for the contract we're leaving so the
+      // next query refetches against the new ID. queries.ts trusts the cache
+      // for normal note operations; this is the one place it can become
+      // stale (user pastes a different ID or registers a fresh contract).
+      const previousId = contractId;
+      if (sdk && previousId && previousId !== trimmed) {
+        void refreshContractCache({ sdk, contractId: previousId });
+      }
+      let nextId: string | null = trimmed;
+      if (trimmed) {
+        saveContractId(trimmed);
+      } else {
+        clearStoredContractId();
+        nextId = loadStoredContractId();
+      }
+      setContractIdState(nextId);
+      // A wallet key can only write to the contract it was issued for.
+      if (
+        walletGrant &&
+        nextId !== previousId &&
+        nextId !== walletGrant.contractId
+      ) {
+        log(
+          "Your wallet key is bound to the previous contract. Sign in again to use this one.",
+          "error",
+        );
+        logout();
+      }
+    },
+    [sdk, contractId, walletGrant, log, logout],
+  );
+
+  const isCurrentWalletKey = useCallback(
+    (origin: { identityId: string; keyId: number }) =>
+      walletKeyRef.current?.identityId === origin.identityId &&
+      walletKeyRef.current.keyId === origin.keyId,
+    [],
+  );
+
   const refreshWalletGrant = useCallback(async () => {
     if (!walletGrant || !identityId || !sdk) return;
-    const keyId = walletGrant.keyId;
+    const origin = { identityId, keyId: walletGrant.keyId };
     try {
       const { readWalletGrant } = await loadAppConnect();
-      const fresh = await readWalletGrant(sdk, identityId, keyId);
+      const fresh = await readWalletGrant(sdk, identityId, origin.keyId);
+      if (!isCurrentWalletKey(origin)) return;
       if (!fresh) {
         log("Your wallet disabled this key.", "error");
         logout();
         return;
       }
-      // Ignore a result for a grant that was replaced while we were reading.
-      setWalletGrant((current) =>
-        current && current.keyId === keyId ? fresh : current,
-      );
+      setWalletGrant(fresh);
     } catch (err) {
+      if (!isCurrentWalletKey(origin)) return;
       log(`Couldn't refresh the wallet connection: ${errorMessage(err)}`, {
         level: "error",
         detail: "readWalletGrant",
       });
     }
-  }, [walletGrant, identityId, sdk, log, logout]);
+  }, [walletGrant, identityId, sdk, log, logout, isCurrentWalletKey]);
 
   const reportWriteError = useCallback(
     async (err: unknown): Promise<"renew" | "logout" | null> => {
-      if (!walletGrant) return null;
+      if (!walletGrant || !identityId) return null;
+      const origin = { identityId, keyId: walletGrant.keyId };
       let action: "renew" | "logout" | null;
       try {
         const { classifyWalletWriteError } = await loadAppConnect();
@@ -510,6 +544,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // The write error is already on screen; nothing more to add.
         return null;
       }
+      if (!isCurrentWalletKey(origin)) return null;
       if (action === "renew") {
         setWalletNotice("renew");
         log(
@@ -522,7 +557,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
       return action;
     },
-    [walletGrant, log, logout],
+    [walletGrant, identityId, log, logout, isCurrentWalletKey],
   );
 
   const dismissWalletNotice = useCallback(() => setWalletNotice(null), []);

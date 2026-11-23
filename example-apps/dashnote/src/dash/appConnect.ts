@@ -17,6 +17,8 @@
  */
 import * as secp256k1 from "@noble/secp256k1";
 import {
+  APP_CONNECT_EXPIRY_MARGIN_MS,
+  APP_CONNECT_MAX_CANDIDATES,
   APP_CONNECT_MAX_REQUEST_AGE_MS,
   KeySecurityLevel,
   appConnectCandidateKey,
@@ -221,6 +223,8 @@ const REFUSAL_MESSAGES: Partial<Record<AppConnectRejectReason, string>> = {
   "key-limits": "The key your wallet sent has no spending limit or no expiry.",
   "key-expired": "The key your wallet sent expires too soon.",
   "budget-exhausted": "The key your wallet sent has no allowance left.",
+  "budget-unknown":
+    "The allowance left on your wallet's key could not be read.",
   "duplicate-binding": "Your wallet sent the same key twice.",
   "primary-missing": "Your wallet did not send a key for Dashnote.",
 };
@@ -260,8 +264,11 @@ function wipeGrant(grant: AppConnectGrant): void {
  * Polls the App Connect contract until one identity's answer verifies, then
  * returns it. Rejects with RequestExpiredError after 10 minutes, with
  * AmbiguousWalletAnswerError when two identities answered, with
+ * TooManyAnswersError past 20 answering identities, with
  * WalletAnswerRefusedError when the only answer is unusable, and with an
- * AbortError DOMException on `signal`.
+ * AbortError DOMException on `signal`. An answer is only accepted on a round
+ * whose read was complete: at once with an identity hint, otherwise once
+ * `settleMs` has passed since it first appeared.
  */
 export async function awaitWalletAnswer(
   sdk: DashSdk,
@@ -281,6 +288,7 @@ export async function awaitWalletAnswer(
   const hint = req.identityHint ?? undefined;
 
   const decided = new Set<string>();
+  const owners = new Set<string>();
   const responders = new Set<string>();
   const answers = new Map<string, WalletAnswer | WalletAnswerRefusedError>();
   let returned: WalletAnswer | null = null;
@@ -289,6 +297,10 @@ export async function awaitWalletAnswer(
   try {
     for (;;) {
       if (signal?.aborted) throw abortError();
+      const delay = appConnectPollDelayMs(now() - req.createdAt);
+      if (delay === null || now() >= req.expiresAt) {
+        throw new RequestExpiredError();
+      }
 
       const page = await listAppConnectCandidates(
         responses,
@@ -297,8 +309,14 @@ export async function awaitWalletAnswer(
       ).catch(() => null);
       if (signal?.aborted) throw abortError();
       if (page?.truncated) throw new TooManyAnswersError();
+      let complete = page !== null;
 
       for (const candidate of page?.candidates ?? []) {
+        // Owners can delete and republish between polls, so the cap spans rounds.
+        owners.add(candidate.ownerId);
+        if (owners.size > APP_CONNECT_MAX_CANDIDATES) {
+          throw new TooManyAnswersError();
+        }
         const key = appConnectCandidateKey(candidate);
         if (decided.has(key)) continue;
         const verdict = await verifyAppConnectCandidate({
@@ -307,12 +325,18 @@ export async function awaitWalletAnswer(
           candidate,
           identity,
           now: req.chainTimeAtCreation + (now() - req.createdAt),
-        });
-        if (!verdict.ok && NOT_AN_ANSWER.has(verdict.reason)) {
+        }).catch(() => null);
+        if (signal?.aborted) throw abortError();
+        if (verdict && !verdict.ok && NOT_AN_ANSWER.has(verdict.reason)) {
           decided.add(key);
           continue;
         }
+        // Past decryption, so this identity did answer this request.
         responders.add(candidate.ownerId);
+        if (verdict === null) {
+          complete = false;
+          continue;
+        }
         if (!verdict.ok && verdict.retryable) continue;
         decided.add(key);
         const previous = answers.get(candidate.ownerId);
@@ -324,7 +348,6 @@ export async function awaitWalletAnswer(
             : new WalletAnswerRefusedError(verdict.reason),
         );
       }
-      if (signal?.aborted) throw abortError();
 
       if (responders.size > 1) {
         throw new AmbiguousWalletAnswerError([...responders]);
@@ -333,28 +356,20 @@ export async function awaitWalletAnswer(
       const answer = answers.values().next().value;
       if (answer && firstAnswerAt === null) firstAnswerAt = now();
       onStatus?.(
-        page === null ? "incomplete-read" : answer ? "answered" : "waiting",
+        !complete ? "incomplete-read" : answer ? "answered" : "waiting",
       );
 
       const settled =
         answer !== undefined &&
-        page !== null &&
+        complete &&
         (hint !== undefined || now() - (firstAnswerAt ?? 0) >= settleMs);
-      const elapsed = now() - req.createdAt;
-      const delay = appConnectPollDelayMs(elapsed);
-      const expired = delay === null || now() >= req.expiresAt;
-      if (answer && (settled || expired)) {
+      if (answer && settled) {
         if (answer instanceof Error) throw answer;
         returned = answer;
         return answer;
       }
-      if (expired) throw new RequestExpiredError();
 
-      const untilSettled =
-        answer && firstAnswerAt !== null
-          ? Math.max(0, settleMs - (now() - firstAnswerAt))
-          : delay;
-      await trigger.wait(Math.min(delay, untilSettled), signal);
+      await trigger.wait(delay, signal);
     }
   } finally {
     for (const answer of answers.values()) {
@@ -387,9 +402,55 @@ function boundContractId(bounds: AppConnectKeyBounds | undefined): string {
   return bounds.contractId;
 }
 
+/** One key of an identity as a proved read sees it, with the block time. */
+interface KeyReading {
+  key: AppConnectIdentityKey | null;
+  remainingBudget: bigint | null;
+  /** Latest block time, ms. */
+  chainTimeMs: number;
+}
+
+async function readIdentityKey(
+  sdk: DashSdk,
+  identityId: string,
+  keyId: number,
+): Promise<KeyReading> {
+  const { data, metadata } = await sdk.identities.fetchWithProof(identityId);
+  const chainTimeMs = Number(metadata.timeMs);
+  const raw = (data?.publicKeys as unknown as SdkKey[] | undefined)?.find(
+    (k) => k.keyId === keyId,
+  );
+  if (!raw) return { key: null, remainingBudget: null, chainTimeMs };
+  const key = toIdentityKey(raw);
+  let remainingBudget: bigint | null = null;
+  if (key.disabledAt === undefined && key.totalBudget !== undefined) {
+    const budgets = await sdk.identities.keysRemainingBudgets(identityId, [
+      keyId,
+    ]);
+    remainingBudget = budgets.get(keyId) ?? null;
+  }
+  return { key, remainingBudget, chainTimeMs };
+}
+
+function toWalletGrant(
+  key: AppConnectIdentityKey,
+  remainingBudget: bigint | null,
+): WalletGrant {
+  return {
+    keyId: key.id,
+    contractId: boundContractId(key.bounds),
+    totalBudget: key.totalBudget ?? null,
+    remainingBudget,
+    expiresAt: key.expiresAt ?? null,
+  };
+}
+
 /**
  * Turns a verified answer into a one-key session via loginWithPrivateKey,
  * exactly as a pasted WIF does, and wipes the grant's private key bytes.
+ * The "Is this you?" step can stay open for any time, so the key is read
+ * again first and refused if it has since been disabled, run out or come
+ * within an hour of expiring.
  */
 export async function loginWithWalletAnswer(
   sdk: DashSdk,
@@ -399,6 +460,36 @@ export async function loginWithWalletAnswer(
   try {
     const granted = grant.authKeys[0];
     if (!granted) throw new Error("The wallet's answer carries no key.");
+    const contractId = boundContractId(granted.key.bounds);
+    const { key, remainingBudget, chainTimeMs } = await readIdentityKey(
+      sdk,
+      answer.identityId,
+      granted.key.id,
+    );
+    if (!key || key.disabledAt !== undefined) {
+      throw new WalletAnswerRefusedError("key-disabled");
+    }
+    if (
+      key.bounds?.kind !== "singleContract" ||
+      key.bounds.contractId !== contractId
+    ) {
+      throw new WalletAnswerRefusedError("key-unmatched");
+    }
+    if (
+      key.expiresAt !== undefined &&
+      key.expiresAt - chainTimeMs <= APP_CONNECT_EXPIRY_MARGIN_MS
+    ) {
+      throw new WalletAnswerRefusedError("key-expired");
+    }
+    if (key.totalBudget !== undefined) {
+      if (remainingBudget === null) {
+        throw new WalletAnswerRefusedError("budget-unknown");
+      }
+      if (remainingBudget <= 0n) {
+        throw new WalletAnswerRefusedError("budget-exhausted");
+      }
+    }
+
     const { PrivateKey } = await loadSdkModule();
     const wif = PrivateKey.fromBytes(granted.privateKey, NETWORK).toWIF();
     const { identityId, ...auth } = await loginWithPrivateKey(
@@ -406,20 +497,15 @@ export async function loginWithWalletAnswer(
       wif,
       answer.identityId,
     );
-    return {
-      identityId,
-      auth,
-      grant: {
-        keyId: granted.key.id,
-        contractId: boundContractId(granted.key.bounds),
-        totalBudget: granted.key.totalBudget ?? null,
-        remainingBudget: granted.remainingBudget ?? null,
-        expiresAt: granted.key.expiresAt ?? null,
-      },
-    };
+    return { identityId, auth, grant: toWalletGrant(key, remainingBudget) };
   } finally {
     wipeGrant(grant);
   }
+}
+
+/** Wipes an answer the app will not sign in with (declined, closed, abandoned). */
+export function disposeWalletAnswer(answer: WalletAnswer): void {
+  wipeGrant(answer.grant);
 }
 
 /** The grant's current limits, or null when the key is gone or disabled. */
@@ -428,36 +514,41 @@ export async function readWalletGrant(
   identityId: string,
   keyId: number,
 ): Promise<WalletGrant | null> {
-  const { data } = await sdk.identities.fetchWithProof(identityId);
-  const raw = (data?.publicKeys as unknown as SdkKey[] | undefined)?.find(
-    (k) => k.keyId === keyId,
-  );
-  if (!raw) return null;
-  const key = toIdentityKey(raw);
-  if (key.disabledAt !== undefined) return null;
-  let remainingBudget: bigint | null = null;
-  if (key.totalBudget !== undefined) {
-    const budgets = await sdk.identities.keysRemainingBudgets(identityId, [
-      keyId,
-    ]);
-    remainingBudget = budgets.get(keyId) ?? null;
-  }
-  return {
+  const { key, remainingBudget } = await readIdentityKey(
+    sdk,
+    identityId,
     keyId,
-    contractId: boundContractId(key.bounds),
-    totalBudget: key.totalBudget ?? null,
-    remainingBudget,
-    expiresAt: key.expiresAt ?? null,
-  };
+  );
+  if (!key || key.disabledAt !== undefined) return null;
+  return toWalletGrant(key, remainingBudget);
 }
 
 export type WalletWriteAction = "renew" | "logout" | null;
 
+interface ErrorShape {
+  code?: unknown;
+  message?: unknown;
+  consensusError?: { code?: unknown };
+  cause?: { code?: unknown };
+}
+
+// WasmSdkError carries the consensus code as `code` (-1 when there is none);
+// the nested codes and the "code 20015" message form are defensive.
 function consensusCodeOf(err: unknown): number | null {
-  const code = (err as { code?: unknown } | null)?.code;
-  if (typeof code === "number") return code;
-  const message = err instanceof Error ? err.message : String(err ?? "");
-  const match = /\b(\d{5})\b/.exec(message);
+  const shape: ErrorShape =
+    typeof err === "object" && err !== null ? (err as ErrorShape) : {};
+  for (const code of [
+    shape.code,
+    shape.consensusError?.code,
+    shape.cause?.code,
+  ]) {
+    if (typeof code === "number" && Number.isInteger(code) && code > 0) {
+      return code;
+    }
+  }
+  const message =
+    typeof shape.message === "string" ? shape.message : String(err ?? "");
+  const match = /\bcode\b[^0-9]{0,6}(\d{5})\b/i.exec(message);
   return match ? Number(match[1]) : null;
 }
 

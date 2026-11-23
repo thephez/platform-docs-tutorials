@@ -906,6 +906,36 @@ describe("LoginModal", () => {
       expect(screen.getByText("renew:true")).toBeTruthy();
     });
 
+    it("keeps an unremembered identity unremembered on renewal", () => {
+      mockUseSession.mockReturnValue(
+        makeSession({
+          status: "authenticated",
+          identityId: "signed-in-id",
+          rememberedIdentityId: null,
+          keyManager: { getAuth: vi.fn() },
+        }),
+      );
+      const props = { onClose: vi.fn(), initialView: "wallet" as const };
+      const { rerender } = render(<LoginModal open={false} {...props} renew />);
+      rerender(<LoginModal open {...props} renew />);
+      expect(screen.getByText("remember:false")).toBeTruthy();
+    });
+
+    it("keeps a remembered identity remembered on renewal", () => {
+      mockUseSession.mockReturnValue(
+        makeSession({
+          status: "authenticated",
+          identityId: "signed-in-id",
+          rememberedIdentityId: "signed-in-id",
+          keyManager: { getAuth: vi.fn() },
+        }),
+      );
+      const props = { onClose: vi.fn(), initialView: "wallet" as const };
+      const { rerender } = render(<LoginModal open={false} {...props} renew />);
+      rerender(<LoginModal open {...props} renew />);
+      expect(screen.getByText("remember:true")).toBeTruthy();
+    });
+
     it("returns to the form when reopened", () => {
       mockUseSession.mockReturnValue(makeSession());
       const { rerender } = render(<LoginModal open onClose={vi.fn()} />);

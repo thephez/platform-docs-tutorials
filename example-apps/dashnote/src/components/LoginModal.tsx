@@ -33,7 +33,12 @@ export function LoginModal({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [rememberMe, setRememberMe] = useState(true);
+  // A renewal keeps the signed-in identity's remember-me choice.
+  const defaultRememberMe = () =>
+    !renew ||
+    (session.identityId !== null &&
+      session.rememberedIdentityId === session.identityId);
+  const [rememberMe, setRememberMe] = useState(defaultRememberMe);
   const [useDifferentIdentity, setUseDifferentIdentity] = useState(false);
   const [expectedIdentityId, setExpectedIdentityId] = useState("");
   const [ambiguousWif, setAmbiguousWif] = useState<string | null>(null);
@@ -78,7 +83,7 @@ export function LoginModal({
     setPrevOpen(open);
     if (open) {
       setView(initialView);
-      setRememberMe(true);
+      setRememberMe(defaultRememberMe());
       setUseDifferentIdentity(false);
       setError(null);
       setSecret("");

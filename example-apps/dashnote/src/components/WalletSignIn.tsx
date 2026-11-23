@@ -39,7 +39,7 @@ export interface WalletSignInProps {
 type Phase =
   | { kind: "preparing" }
   | { kind: "waiting"; uri: string; svg: string; expiresAt: number }
-  | { kind: "confirm"; answer: WalletAnswer; name: string | null }
+  | { kind: "confirm"; identityId: string; name: string | null }
   | { kind: "signing-in" }
   | { kind: "error"; message: string; retry: boolean };
 
@@ -48,6 +48,13 @@ const STATUS_COPY: Record<WalletPollStatus, string> = {
   answered: "Checking the answer…",
   "incomplete-read": "Couldn't read every answer, retrying…",
 };
+
+// The answer holds the granted private key, so it lives outside render state
+// and is wiped by whoever drops it.
+interface PendingAnswer {
+  answer: WalletAnswer;
+  mod: AppConnectModule;
+}
 
 const secondaryButton =
   "min-h-11 rounded-md border border-line bg-transparent px-4 py-2 text-[13px] font-semibold text-ink-3 transition hover:border-line-2 hover:text-ink-2";
@@ -71,7 +78,9 @@ export function WalletSignIn({
   const [replacedCode, setReplacedCode] = useState(false);
   const [copied, setCopied] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const continueRef = useRef<HTMLButtonElement>(null);
   const aliveRef = useRef(true);
+  const pendingRef = useRef<PendingAnswer | null>(null);
 
   // Read through a ref so the poll effect doesn't restart whenever the
   // session object changes identity.
@@ -84,19 +93,32 @@ export function WalletSignIn({
 
   useEffect(() => {
     aliveRef.current = true;
-    headingRef.current?.focus();
+    // Deferred so it runs after the dialog focuses itself when the modal
+    // opens straight into this view.
+    queueMicrotask(() => {
+      if (aliveRef.current) headingRef.current?.focus();
+    });
     return () => {
       aliveRef.current = false;
     };
   }, []);
 
-  const signIn = useCallback(async (answer: WalletAnswer) => {
+  const releasePending = useCallback(() => {
+    const pending = pendingRef.current;
+    pendingRef.current = null;
+    pending?.mod.disposeWalletAnswer(pending.answer);
+  }, []);
+
+  // Takes ownership of the answer: loginWithWalletAnswer wipes it.
+  const signIn = useCallback(async ({ answer, mod }: PendingAnswer) => {
     const connected = sessionRef.current.sdk;
-    if (!connected) return;
+    if (!connected) {
+      mod.disposeWalletAnswer(answer);
+      return;
+    }
     setPhase({ kind: "signing-in" });
     try {
-      const { loginWithWalletAnswer } = await loadAppConnect();
-      const login = await loginWithWalletAnswer(connected, answer);
+      const login = await mod.loginWithWalletAnswer(connected, answer);
       if (!aliveRef.current) return;
       await sessionRef.current.loginWithWallet(login, {
         rememberMe: propsRef.current.rememberMe,
@@ -166,18 +188,25 @@ export function WalletSignIn({
             if (!signal.aborted) setPollStatus(status);
           },
         });
-        if (signal.aborted) return;
-        if (identityHint) {
-          void signIn(answer);
+        if (signal.aborted) {
+          mod.disposeWalletAnswer(answer);
           return;
         }
+        if (identityHint) {
+          void signIn({ answer, mod });
+          return;
+        }
+        // Held here until the user answers "Is this you?"; the cleanup
+        // below wipes it if this attempt ends first.
+        pendingRef.current = { answer, mod };
         const name = await resolveDpnsName(sdk, answer.identityId).catch(
           () => null,
         );
         if (signal.aborted) return;
-        setPhase({ kind: "confirm", answer, name });
+        setPhase({ kind: "confirm", identityId: answer.identityId, name });
       } catch (err) {
         if (signal.aborted) return;
+        releasePending();
         setPhase(describeError(err, mod));
       } finally {
         if (req && mod) mod.disposeWalletLoginRequest(req);
@@ -186,10 +215,16 @@ export function WalletSignIn({
 
     return () => {
       controller.abort();
+      releasePending();
       window.removeEventListener("focus", wake);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [sdk, contractId, identityHint, attempt, signIn]);
+  }, [sdk, contractId, identityHint, attempt, signIn, releasePending]);
+
+  const confirming = phase.kind === "confirm";
+  useEffect(() => {
+    if (confirming) continueRef.current?.focus();
+  }, [confirming]);
 
   const waiting = phase.kind === "waiting";
   useEffect(() => {
@@ -205,8 +240,16 @@ export function WalletSignIn({
   }, [copied]);
 
   function startOver(afterReject: boolean) {
+    releasePending();
     setReplacedCode(afterReject);
     setAttempt((n) => n + 1);
+  }
+
+  function confirmAnswer() {
+    const pending = pendingRef.current;
+    if (!pending) return;
+    pendingRef.current = null;
+    void signIn(pending);
   }
 
   async function copyLink(uri: string) {
@@ -324,18 +367,19 @@ export function WalletSignIn({
               </div>
             )}
             <div className="break-all font-mono text-[12px] text-ink-3">
-              {phase.answer.identityId}
+              {phase.identityId}
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
             <button
+              ref={continueRef}
               type="button"
-              onClick={() => void signIn(phase.answer)}
+              onClick={confirmAnswer}
               className={primaryButton}
             >
               {phase.name
                 ? `Continue as @${phase.name}`
-                : `Continue as ${truncateId(phase.answer.identityId, 8, 4)}`}
+                : `Continue as ${truncateId(phase.identityId, 8, 4)}`}
             </button>
             <button
               type="button"
@@ -369,7 +413,10 @@ export function WalletSignIn({
 
       <button
         type="button"
-        onClick={onBack}
+        onClick={() => {
+          releasePending();
+          onBack();
+        }}
         className="self-start text-[11px] font-medium text-accent-dim underline-offset-2 hover:text-accent hover:underline"
       >
         ← Back

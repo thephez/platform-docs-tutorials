@@ -46,6 +46,7 @@ interface SessionOverrides {
   walletGrant?: unknown;
   walletNotice?: "renew" | null;
   refreshWalletGrant?: ReturnType<typeof vi.fn>;
+  dismissWalletNotice?: ReturnType<typeof vi.fn>;
 }
 
 function makeSession(overrides: SessionOverrides = {}) {
@@ -68,6 +69,7 @@ function makeSession(overrides: SessionOverrides = {}) {
     walletGrant: null,
     walletNotice: null,
     refreshWalletGrant: vi.fn().mockResolvedValue(undefined),
+    dismissWalletNotice: vi.fn(),
     ...overrides,
   };
 }
@@ -319,6 +321,48 @@ describe("SettingsPanel", () => {
       expect(screen.getByRole("alert").textContent).toMatch(
         /ran out of allowance or expired/,
       );
+    });
+
+    it("dismisses the renewal notice", () => {
+      const dismissWalletNotice = vi.fn();
+      mockUseSession.mockReturnValue(
+        makeSession({
+          walletGrant: grant,
+          walletNotice: "renew",
+          dismissWalletNotice,
+        }),
+      );
+      render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
+      fireEvent.click(
+        within(screen.getByRole("alert")).getByRole("button", {
+          name: "Dismiss",
+        }),
+      );
+      expect(dismissWalletNotice).toHaveBeenCalledTimes(1);
+    });
+
+    it("can't register a contract with a wallet key", () => {
+      mockUseSession.mockReturnValue(makeSession({ walletGrant: grant }));
+      render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
+      const button = screen.getByRole("button", {
+        name: "Register a fresh contract",
+      }) as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+      expect(
+        screen.getByText(
+          "Registering a contract needs a mnemonic or private-key sign-in; a wallet key only writes notes.",
+        ),
+      ).toBeTruthy();
+    });
+
+    it("offers registration outside a wallet session", () => {
+      mockUseSession.mockReturnValue(makeSession());
+      render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
+      const button = screen.getByRole("button", {
+        name: "Register a fresh contract",
+      }) as HTMLButtonElement;
+      expect(button.disabled).toBe(false);
+      expect(screen.queryByText(/a wallet key only writes notes/)).toBeNull();
     });
   });
 });

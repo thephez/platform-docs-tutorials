@@ -830,6 +830,110 @@ describe("SessionProvider", () => {
       expect(ref.current.walletGrant).toBeNull();
       expect(ref.current.status).toBe("browsing");
     });
+
+    function pending<T>() {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((res) => {
+        resolve = res;
+      });
+      return { promise, resolve };
+    }
+
+    async function renewTo(
+      ref: { current: SessionValue },
+      identityId: string,
+      keyId: number,
+    ) {
+      await act(async () => {
+        await ref.current.loginWithWallet(
+          { identityId, auth: auth as never, grant: { ...grant, keyId } },
+          { rememberMe: true },
+        );
+      });
+    }
+
+    it("refreshWalletGrant ignores a result for a key that was since replaced", async () => {
+      const ref = await signInWithWallet();
+      const read = pending<null>();
+      mockReadWalletGrant.mockReturnValue(read.promise);
+      let refresh!: Promise<void>;
+      act(() => {
+        refresh = ref.current.refreshWalletGrant();
+      });
+
+      await renewTo(ref, "wallet-identity", 6);
+      await act(async () => {
+        read.resolve(null);
+        await refresh;
+      });
+
+      expect(mockToastError).not.toHaveBeenCalled();
+      expect(ref.current.status).toBe("authenticated");
+      expect(ref.current.walletGrant?.keyId).toBe(6);
+    });
+
+    it("refreshWalletGrant does not apply limits to another identity's key with the same id", async () => {
+      const ref = await signInWithWallet();
+      const read = pending<typeof grant>();
+      mockReadWalletGrant.mockReturnValue(read.promise);
+      let refresh!: Promise<void>;
+      act(() => {
+        refresh = ref.current.refreshWalletGrant();
+      });
+
+      await renewTo(ref, "other-identity", 5);
+      await act(async () => {
+        read.resolve({ ...grant, remainingBudget: 1n });
+        await refresh;
+      });
+
+      expect(ref.current.identityId).toBe("other-identity");
+      expect(ref.current.walletGrant).toEqual(grant);
+    });
+
+    it("reportWriteError ignores a failure from a key that was since replaced", async () => {
+      const ref = await signInWithWallet();
+      mockClassifyWalletWriteError.mockReturnValue("logout");
+      // The write handler holds the session from the render that started
+      // the write, so its report arrives through that render's callback.
+      const reportFromOldKey = ref.current.reportWriteError;
+
+      await renewTo(ref, "wallet-identity", 6);
+      let action: unknown = "unset";
+      await act(async () => {
+        action = await reportFromOldKey(new Error("disabled"));
+      });
+
+      expect(action).toBeNull();
+      expect(mockToastError).not.toHaveBeenCalled();
+      expect(ref.current.status).toBe("authenticated");
+      expect(ref.current.walletGrant?.keyId).toBe(6);
+    });
+
+    it("signs out when the app switches away from the key's contract", async () => {
+      localStorage.setItem("dashnote.contractId", "contract-abc");
+      const ref = await signInWithWallet();
+
+      act(() => ref.current.setContractId("contract-xyz"));
+
+      expect(ref.current.contractId).toBe("contract-xyz");
+      expect(mockToastError).toHaveBeenCalledWith(
+        "Your wallet key is bound to the previous contract. Sign in again to use this one.",
+      );
+      expect(ref.current.walletGrant).toBeNull();
+      expect(ref.current.keyManager).toBeNull();
+    });
+
+    it("keeps the wallet session when the contract stays the key's own", async () => {
+      localStorage.setItem("dashnote.contractId", "contract-abc");
+      const ref = await signInWithWallet();
+
+      act(() => ref.current.setContractId(" contract-abc "));
+
+      expect(mockToastError).not.toHaveBeenCalled();
+      expect(ref.current.walletGrant).toEqual(grant);
+      expect(ref.current.status).toBe("authenticated");
+    });
   });
 
   describe("activity log", () => {

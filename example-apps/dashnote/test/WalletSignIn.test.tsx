@@ -10,6 +10,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { Modal } from "../src/components/Modal";
 import { WalletSignIn } from "../src/components/WalletSignIn";
 
 const mocks = vi.hoisted(() => {
@@ -37,6 +38,7 @@ const mocks = vi.hoisted(() => {
     disposeWalletLoginRequest: vi.fn(),
     awaitWalletAnswer: vi.fn(),
     loginWithWalletAnswer: vi.fn(),
+    disposeWalletAnswer: vi.fn(),
     RequestExpiredError,
     AmbiguousWalletAnswerError,
     WalletAnswerRefusedError,
@@ -60,6 +62,7 @@ vi.mock("../src/dash/appConnect", () => ({
   disposeWalletLoginRequest: mocks.disposeWalletLoginRequest,
   awaitWalletAnswer: mocks.awaitWalletAnswer,
   loginWithWalletAnswer: mocks.loginWithWalletAnswer,
+  disposeWalletAnswer: mocks.disposeWalletAnswer,
   PollTrigger: mocks.PollTrigger,
   RequestExpiredError: mocks.RequestExpiredError,
   AmbiguousWalletAnswerError: mocks.AmbiguousWalletAnswerError,
@@ -126,6 +129,7 @@ beforeEach(() => {
   mocks.disposeWalletLoginRequest.mockReset();
   mocks.awaitWalletAnswer.mockReset();
   mocks.loginWithWalletAnswer.mockReset();
+  mocks.disposeWalletAnswer.mockReset();
 
   mocks.mockUseSession.mockReturnValue(makeSession());
   mocks.mockResolveDpnsName.mockResolvedValue("alice");
@@ -390,6 +394,98 @@ describe("WalletSignIn", () => {
     const { onBack } = renderSignIn();
     fireEvent.click(screen.getByRole("button", { name: /back/i }));
     expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  describe("wiping the answer", () => {
+    async function reachConfirm(props = {}) {
+      const utils = renderSignIn(props);
+      await screen.findByTestId("wallet-request-uri");
+      const answer = { identityId: IDENTITY, grant: {} };
+      await act(async () => answers[0].resolve(answer));
+      await screen.findByText("Is this you?");
+      return { ...utils, answer };
+    }
+
+    it("wipes a declined answer", async () => {
+      const { answer } = await reachConfirm();
+      fireEvent.click(screen.getByRole("button", { name: "That's not me" }));
+      expect(mocks.disposeWalletAnswer).toHaveBeenCalledTimes(1);
+      expect(mocks.disposeWalletAnswer).toHaveBeenCalledWith(answer);
+      await screen.findByDisplayValue("dash-connect:request-2");
+      expect(mocks.disposeWalletAnswer).toHaveBeenCalledTimes(1);
+    });
+
+    it("wipes the answer on Back", async () => {
+      const { answer, onBack } = await reachConfirm();
+      fireEvent.click(screen.getByRole("button", { name: /back/i }));
+      expect(mocks.disposeWalletAnswer).toHaveBeenCalledWith(answer);
+      expect(onBack).toHaveBeenCalledTimes(1);
+    });
+
+    it("wipes the answer when it unmounts while confirming", async () => {
+      const { answer, unmount } = await reachConfirm();
+      unmount();
+      expect(mocks.disposeWalletAnswer).toHaveBeenCalledTimes(1);
+      expect(mocks.disposeWalletAnswer).toHaveBeenCalledWith(answer);
+    });
+
+    it("wipes an answer that arrives while the name is still loading", async () => {
+      const name = deferred<string | null>();
+      mocks.mockResolveDpnsName.mockReturnValue(name.promise);
+      const { unmount } = renderSignIn();
+      await screen.findByTestId("wallet-request-uri");
+      const answer = { identityId: IDENTITY, grant: {} };
+      await act(async () => answers[0].resolve(answer));
+
+      unmount();
+      expect(mocks.disposeWalletAnswer).toHaveBeenCalledWith(answer);
+      await act(async () => name.resolve("alice"));
+      expect(mocks.disposeWalletAnswer).toHaveBeenCalledTimes(1);
+    });
+
+    it("hands the answer to the sign-in instead of wiping it", async () => {
+      const { answer, onSignedIn, unmount } = await reachConfirm();
+      fireEvent.click(
+        screen.getByRole("button", { name: "Continue as @alice" }),
+      );
+      await waitFor(() => expect(onSignedIn).toHaveBeenCalledTimes(1));
+      expect(mocks.loginWithWalletAnswer).toHaveBeenCalledWith(
+        expect.anything(),
+        answer,
+      );
+      unmount();
+      expect(mocks.disposeWalletAnswer).not.toHaveBeenCalled();
+    });
+  });
+
+  it("focuses the heading after the dialog takes focus", async () => {
+    render(
+      <Modal open title="Sign in" onClose={vi.fn()}>
+        <WalletSignIn
+          identityHint={null}
+          rememberMe
+          onSignedIn={vi.fn()}
+          onBack={vi.fn()}
+        />
+      </Modal>,
+    );
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("heading", { name: "Sign in with DashPay" }),
+      ),
+    );
+  });
+
+  it("moves focus to Continue when asking who answered", async () => {
+    renderSignIn();
+    await screen.findByTestId("wallet-request-uri");
+    await act(async () =>
+      answers[0].resolve({ identityId: IDENTITY, grant: {} }),
+    );
+    const button = await screen.findByRole("button", {
+      name: "Continue as @alice",
+    });
+    expect(document.activeElement).toBe(button);
   });
 
   it("aborts the poll when it unmounts", async () => {
