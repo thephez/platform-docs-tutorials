@@ -524,6 +524,7 @@ export function NotesWorkspace({
       }
     } catch (err) {
       setError(errorMessage(err));
+      void session.reportWriteError(err);
       // Save failed — chain may have moved (e.g. another window incremented
       // the identity nonce by saving first). Refresh the note so the user
       // sees what's actually on chain before they retry, and surface the
@@ -631,6 +632,7 @@ export function NotesWorkspace({
       await reloadNotes();
     } catch (err) {
       setError(errorMessage(err));
+      void session.reportWriteError(err);
     } finally {
       inFlightWriteRef.current = false;
       setDeleting(false);

@@ -4,7 +4,7 @@ import { Toaster } from "sonner";
 import { ActivityPanel } from "./components/ActivityPanel";
 import { AppShell } from "./components/AppShell";
 import { HowItWorks } from "./components/HowItWorks";
-import { LoginModal } from "./components/LoginModal";
+import { LoginModal, type LoginView } from "./components/LoginModal";
 import { NotesToolbar } from "./components/NotesToolbar";
 import { NotesWorkspace } from "./components/NotesWorkspace";
 import { OperationResultNotice } from "./components/OperationResultNotice";
@@ -36,6 +36,8 @@ function App() {
   const { status, sdk, enterReadOnly, viewAsRemembered } = session;
   const [tab, setTab] = useState<TopTab>("notes");
   const [loginOpen, setLoginOpen] = useState(false);
+  const [loginView, setLoginView] = useState<LoginView>("form");
+  const [loginRenew, setLoginRenew] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const isDesktop = useMediaQuery("(min-width: 768px)");
 
@@ -57,6 +59,18 @@ function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const openLogin = () => {
+    setLoginView("form");
+    setLoginRenew(false);
+    setLoginOpen(true);
+  };
+
+  const openRenew = () => {
+    setLoginView("wallet");
+    setLoginRenew(true);
+    setLoginOpen(true);
+  };
+
   const header = useMemo(() => screenCopy[tab], [tab]);
 
   return (
@@ -69,7 +83,7 @@ function App() {
         identityId={session.identityId}
         dpnsName={session.dpnsName}
         contractId={session.contractId}
-        onLoginOpen={() => setLoginOpen(true)}
+        onLoginOpen={openLogin}
         onOpenActivity={() => setActivityOpen(true)}
         mobileFullBleed={mobileFullBleed}
       >
@@ -106,18 +120,26 @@ function App() {
 
           {tab === "notes" && (
             <NotesWorkspace
-              onOpenLogin={() => setLoginOpen(true)}
+              onOpenLogin={openLogin}
               onOpenSettings={() => setTab("settings")}
             />
           )}
           {tab === "how-it-works" && <HowItWorks />}
           {tab === "settings" && (
-            <SettingsPanel onOpenLogin={() => setLoginOpen(true)} />
+            <SettingsPanel
+              onOpenLogin={openLogin}
+              onRenewInWallet={openRenew}
+            />
           )}
         </div>
       </AppShell>
 
-      <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} />
+      <LoginModal
+        open={loginOpen}
+        onClose={() => setLoginOpen(false)}
+        initialView={loginView}
+        renew={loginRenew}
+      />
       <ActivityPanel
         open={activityOpen}
         onClose={() => setActivityOpen(false)}

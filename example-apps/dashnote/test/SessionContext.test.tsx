@@ -24,6 +24,18 @@ const {
   mockToastSuccess: vi.fn(),
 }));
 
+const { mockReadWalletGrant, mockClassifyWalletWriteError } = vi.hoisted(
+  () => ({
+    mockReadWalletGrant: vi.fn(),
+    mockClassifyWalletWriteError: vi.fn(),
+  }),
+);
+
+vi.mock("../src/dash/appConnect", () => ({
+  readWalletGrant: mockReadWalletGrant,
+  classifyWalletWriteError: mockClassifyWalletWriteError,
+}));
+
 vi.mock("../../../setupDashClient-core.mjs", () => ({
   createClient: mockCreateClient,
   IdentityKeyManager: {
@@ -110,6 +122,8 @@ beforeEach(() => {
   mockToastSuccess.mockReset();
   mockResolveDpnsName.mockReset();
   mockLoginWithPrivateKey.mockReset();
+  mockReadWalletGrant.mockReset();
+  mockClassifyWalletWriteError.mockReset();
   mockResolveDpnsName.mockImplementation(async (sdk, identityId) => {
     const result = await sdk.dpns.username(identityId);
     if (typeof result !== "string" || result.length === 0) return null;
@@ -668,6 +682,154 @@ describe("SessionProvider", () => {
     expect(mockToastError).toHaveBeenCalledWith(
       expect.stringContaining("checksum"),
     );
+  });
+
+  describe("wallet sessions", () => {
+    const grant = {
+      keyId: 5,
+      contractId: "contract-abc",
+      totalBudget: 10_000_000_000n,
+      remainingBudget: 9_000_000_000n,
+      expiresAt: 1_800_000_000_000,
+    };
+    const auth = { identity: {}, identityKey: undefined, signer: {} };
+
+    async function signInWithWallet(rememberMe = true) {
+      const ref = mountSession();
+      await act(async () => {
+        await ref.current.loginWithWallet(
+          { identityId: "wallet-identity", auth: auth as never, grant },
+          { rememberMe },
+        );
+      });
+      return ref;
+    }
+
+    it("loginWithWallet authenticates with the granted key and keeps the grant", async () => {
+      mockDpnsUsername.mockResolvedValue("alice.dash");
+      const ref = await signInWithWallet();
+
+      expect(ref.current.status).toBe("authenticated");
+      expect(ref.current.identityId).toBe("wallet-identity");
+      expect(ref.current.dpnsName).toBe("alice");
+      expect(ref.current.walletGrant).toEqual(grant);
+      expect(ref.current.walletNotice).toBeNull();
+      expect(await ref.current.keyManager?.getAuth()).toBe(auth);
+      expect(
+        ref.current.activityLog.find((e) =>
+          e.message.startsWith("Identity resolved"),
+        )?.detail,
+      ).toBe("loginWithWalletAnswer");
+      expect(
+        JSON.parse(localStorage.getItem(REMEMBERED_KEY) ?? "null"),
+      ).toEqual({ id: "wallet-identity", name: "alice" });
+    });
+
+    it("a mnemonic login and a logout both drop the grant", async () => {
+      const ref = await signInWithWallet(false);
+      mockKeyManagerCreate.mockResolvedValue({ identityId: "mnemonic-id" });
+      await act(async () => {
+        await ref.current.login("test mnemonic");
+      });
+      expect(ref.current.walletGrant).toBeNull();
+
+      await act(async () => {
+        await ref.current.loginWithWallet(
+          { identityId: "wallet-identity", auth: auth as never, grant },
+          {},
+        );
+      });
+      expect(ref.current.walletGrant).toEqual(grant);
+      act(() => ref.current.logout());
+      expect(ref.current.walletGrant).toBeNull();
+      expect(ref.current.keyManager).toBeNull();
+    });
+
+    it("reportWriteError asks for a renewal when the key ran out", async () => {
+      const ref = await signInWithWallet();
+      mockClassifyWalletWriteError.mockReturnValue("renew");
+      const failure = new Error("budget");
+
+      let action: unknown;
+      await act(async () => {
+        action = await ref.current.reportWriteError(failure);
+      });
+
+      expect(action).toBe("renew");
+      expect(mockClassifyWalletWriteError).toHaveBeenCalledWith(failure);
+      expect(ref.current.walletNotice).toBe("renew");
+      expect(ref.current.status).toBe("authenticated");
+      expect(mockToastError).toHaveBeenCalledWith(
+        expect.stringMatching(/Renew the connection in DashPay/),
+      );
+
+      act(() => ref.current.dismissWalletNotice());
+      expect(ref.current.walletNotice).toBeNull();
+    });
+
+    it("reportWriteError logs out when the wallet revoked the key", async () => {
+      const ref = await signInWithWallet(false);
+      mockClassifyWalletWriteError.mockReturnValue("logout");
+
+      await act(async () => {
+        await ref.current.reportWriteError(new Error("disabled"));
+      });
+
+      expect(mockToastError).toHaveBeenCalledWith(
+        "Your wallet revoked this browser's key. Sign in again.",
+      );
+      expect(ref.current.keyManager).toBeNull();
+      expect(ref.current.walletGrant).toBeNull();
+      expect(ref.current.status).toBe("readonly");
+    });
+
+    it("reportWriteError ignores failures outside a wallet session", async () => {
+      mockKeyManagerCreate.mockResolvedValue({ identityId: "mnemonic-id" });
+      const ref = mountSession();
+      await act(async () => {
+        await ref.current.login("test mnemonic");
+      });
+
+      let action: unknown = "unset";
+      await act(async () => {
+        action = await ref.current.reportWriteError(new Error("boom"));
+      });
+      expect(action).toBeNull();
+      expect(mockClassifyWalletWriteError).not.toHaveBeenCalled();
+    });
+
+    it("refreshWalletGrant reads the latest limits", async () => {
+      const ref = await signInWithWallet();
+      const fresher = { ...grant, remainingBudget: 1n };
+      mockReadWalletGrant.mockResolvedValue(fresher);
+
+      await act(async () => {
+        await ref.current.refreshWalletGrant();
+      });
+
+      expect(mockReadWalletGrant).toHaveBeenCalledWith(
+        expect.anything(),
+        "wallet-identity",
+        5,
+      );
+      expect(ref.current.walletGrant).toEqual(fresher);
+    });
+
+    it("refreshWalletGrant logs out when the wallet disabled the key", async () => {
+      const ref = await signInWithWallet();
+      mockReadWalletGrant.mockResolvedValue(null);
+
+      await act(async () => {
+        await ref.current.refreshWalletGrant();
+      });
+
+      expect(mockToastError).toHaveBeenCalledWith(
+        "Your wallet disabled this key.",
+      );
+      expect(ref.current.keyManager).toBeNull();
+      expect(ref.current.walletGrant).toBeNull();
+      expect(ref.current.status).toBe("browsing");
+    });
   });
 
   describe("activity log", () => {

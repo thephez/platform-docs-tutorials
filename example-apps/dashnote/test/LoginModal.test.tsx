@@ -29,6 +29,28 @@ vi.mock("../src/hooks/useWifPreview", () => ({
   useWifPreview: mockUseWifPreview,
 }));
 
+vi.mock("../src/components/WalletSignIn", () => ({
+  WalletSignIn: (props: {
+    identityHint: string | null;
+    rememberMe: boolean;
+    renew?: boolean;
+    onBack: () => void;
+    onSignedIn: () => void;
+  }) => (
+    <div data-testid="wallet-sign-in">
+      <span>hint:{String(props.identityHint)}</span>
+      <span>remember:{String(props.rememberMe)}</span>
+      <span>renew:{String(Boolean(props.renew))}</span>
+      <button type="button" onClick={props.onBack}>
+        Wallet back
+      </button>
+      <button type="button" onClick={props.onSignedIn}>
+        Wallet done
+      </button>
+    </div>
+  ),
+}));
+
 interface SessionOverrides {
   status?: string;
   dpnsName?: string | null;
@@ -816,6 +838,86 @@ describe("LoginModal", () => {
         target: { value: "two words here" },
       });
       expect(screen.queryByTestId("wif-preview")).toBeNull();
+    });
+  });
+
+  describe("DashPay sign-in", () => {
+    it("offers DashPay above the mnemonic form", () => {
+      mockUseSession.mockReturnValue(makeSession());
+      render(<LoginModal open onClose={vi.fn()} />);
+      expect(screen.getByText("Sign in with DashPay")).toBeTruthy();
+      expect(
+        screen.getByText("Approve on your phone. Nothing to paste."),
+      ).toBeTruthy();
+      expect(screen.getByText("or use a mnemonic / private key")).toBeTruthy();
+      expect(screen.getByPlaceholderText(/mnemonic phrase/i)).toBeTruthy();
+    });
+
+    it("switches to the wallet view and back", () => {
+      mockUseSession.mockReturnValue(makeSession());
+      const onClose = vi.fn();
+      render(<LoginModal open onClose={onClose} />);
+
+      const continueButton = screen.getByRole("button", {
+        name: "Continue with DashPay",
+      });
+      fireEvent.click(continueButton);
+      expect(screen.getByTestId("wallet-sign-in")).toBeTruthy();
+      expect(screen.getByText("hint:null")).toBeTruthy();
+      expect(screen.getByText("remember:true")).toBeTruthy();
+      expect(screen.queryByPlaceholderText(/mnemonic phrase/i)).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Wallet back" }));
+      expect(screen.getByPlaceholderText(/mnemonic phrase/i)).toBeTruthy();
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Continue with DashPay" }),
+      );
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Continue with DashPay" }),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Wallet done" }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("passes the remembered identity and the remember choice along", () => {
+      mockUseSession.mockReturnValue(
+        makeSession({ rememberedIdentityId: "remembered-identity-id" }),
+      );
+      render(<LoginModal open onClose={vi.fn()} />);
+      fireEvent.click(screen.getByRole("checkbox"));
+      fireEvent.click(
+        screen.getByRole("button", { name: "Continue with DashPay" }),
+      );
+      expect(screen.getByText("hint:remembered-identity-id")).toBeTruthy();
+      expect(screen.getByText("remember:false")).toBeTruthy();
+    });
+
+    it("opens straight into a renewal for the signed-in identity", () => {
+      mockUseSession.mockReturnValue(
+        makeSession({
+          status: "authenticated",
+          identityId: "signed-in-id",
+          keyManager: { getAuth: vi.fn() },
+        }),
+      );
+      render(<LoginModal open onClose={vi.fn()} initialView="wallet" renew />);
+      expect(screen.getByText("hint:signed-in-id")).toBeTruthy();
+      expect(screen.getByText("renew:true")).toBeTruthy();
+    });
+
+    it("returns to the form when reopened", () => {
+      mockUseSession.mockReturnValue(makeSession());
+      const { rerender } = render(<LoginModal open onClose={vi.fn()} />);
+      fireEvent.click(
+        screen.getByRole("button", { name: "Continue with DashPay" }),
+      );
+      expect(screen.getByTestId("wallet-sign-in")).toBeTruthy();
+
+      rerender(<LoginModal open={false} onClose={vi.fn()} />);
+      rerender(<LoginModal open onClose={vi.fn()} />);
+      expect(screen.queryByTestId("wallet-sign-in")).toBeNull();
+      expect(screen.getByPlaceholderText(/mnemonic phrase/i)).toBeTruthy();
     });
   });
 });

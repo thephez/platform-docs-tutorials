@@ -57,6 +57,7 @@ function makeSession(overrides: Record<string, unknown> = {}) {
     contractId: "contract-1",
     identityId: "identity-1",
     log: vi.fn(),
+    reportWriteError: vi.fn().mockResolvedValue(null),
     ...overrides,
   };
 }
@@ -186,6 +187,66 @@ describe("NotesWorkspace", () => {
       expect(mockListMyNotes).toHaveBeenCalledTimes(2);
     });
     expect(screen.getByDisplayValue("Body only")).toBeTruthy();
+  });
+
+  it("reports a failed create to the session so a wallet session can react", async () => {
+    const reportWriteError = vi.fn().mockResolvedValue("renew");
+    mockUseSession.mockReturnValue(makeSession({ reportWriteError }));
+    mockListMyNotes.mockResolvedValue([]);
+    const failure = new Error("Key budget exceeded");
+    mockCreateNote.mockRejectedValue(failure);
+
+    render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListMyNotes).toHaveBeenCalledTimes(1);
+    });
+    fireEvent.click(screen.getByRole("button", { name: /new note/i }));
+    fireEvent.change(screen.getByLabelText(/body/i), {
+      target: { value: "Too big for the key" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create note/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/key budget exceeded/i)).toBeTruthy();
+    });
+    expect(reportWriteError).toHaveBeenCalledWith(failure);
+  });
+
+  it("reports a failed delete to the session", async () => {
+    const reportWriteError = vi.fn().mockResolvedValue("logout");
+    mockUseSession.mockReturnValue(makeSession({ reportWriteError }));
+    const note = {
+      id: "note-9",
+      ownerId: "identity-1",
+      title: "Doomed",
+      message: "Hello",
+      createdAt: 1000,
+      updatedAt: 2000,
+      revision: 1,
+    };
+    mockListMyNotes.mockResolvedValue([note]);
+    mockGetNote.mockResolvedValue(note);
+    const failure = new Error("Key disabled");
+    mockDeleteNote.mockRejectedValue(failure);
+
+    render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockGetNote).toHaveBeenCalledWith(
+        expect.objectContaining({ noteId: "note-9" }),
+      );
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: /^delete$/i,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(reportWriteError).toHaveBeenCalledWith(failure);
+    });
   });
 
   it("shows the empty notebook state for a valid contract with no notes", async () => {

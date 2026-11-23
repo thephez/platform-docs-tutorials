@@ -65,7 +65,21 @@ vi.mock("../src/components/AppShell", () => ({
 }));
 
 vi.mock("../src/components/LoginModal", () => ({
-  LoginModal: ({ open }: { open: boolean }) => <div>login:{String(open)}</div>,
+  LoginModal: ({
+    open,
+    initialView,
+    renew,
+  }: {
+    open: boolean;
+    initialView?: string;
+    renew?: boolean;
+  }) => (
+    <div>
+      <span>login:{String(open)}</span>
+      <span>view:{String(initialView)}</span>
+      <span>renew:{String(Boolean(renew))}</span>
+    </div>
+  ),
 }));
 
 vi.mock("../src/components/ActivityPanel", () => ({
@@ -218,5 +232,36 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: /settings tab/i }));
     expect(screen.getByTestId("settings-identity-block")).toBeTruthy();
     expect(screen.getByText("id-app-settings")).toBeTruthy();
+  });
+
+  it("opens the login modal on the form, and on DashPay to renew", () => {
+    mockUseSession.mockReturnValue(
+      makeSession({
+        status: "authenticated",
+        identityId: "id-wallet",
+        contractId: "contract-wallet",
+        sdk: { documents: {} },
+        walletGrant: {
+          keyId: 3,
+          contractId: "contract-wallet",
+          totalBudget: null,
+          remainingBudget: null,
+          expiresAt: null,
+        },
+        walletNotice: null,
+        refreshWalletGrant: vi.fn(),
+      }),
+    );
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /settings tab/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Renew in DashPay" }));
+    expect(screen.getByText("login:true")).toBeTruthy();
+    expect(screen.getByText("view:wallet")).toBeTruthy();
+    expect(screen.getByText("renew:true")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    expect(screen.getByText("view:form")).toBeTruthy();
+    expect(screen.getByText("renew:false")).toBeTruthy();
   });
 });

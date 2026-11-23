@@ -15,13 +15,31 @@
  * rules in CLAUDE.md): it pulls in loginWithPrivateKey, which has top-level
  * @dashevo/evo-sdk value imports.
  */
-import type { AppConnectGrant } from "../vendor/platform-auth/app-connect";
+import * as secp256k1 from "@noble/secp256k1";
+import {
+  APP_CONNECT_MAX_REQUEST_AGE_MS,
+  KeySecurityLevel,
+  appConnectCandidateKey,
+  appConnectPollDelayMs,
+  appConnectRequestHash,
+  buildAppConnectUri,
+  classifyAppConnectError,
+  listAppConnectCandidates,
+  verifyAppConnectCandidate,
+} from "../vendor/platform-auth/app-connect";
 import type {
+  AppConnectCandidate,
+  AppConnectGrant,
+  AppConnectIdentityKey,
   AppConnectIdentityPort,
+  AppConnectKeyBounds,
   AppConnectRequest,
   AppConnectResponsePort,
   AppConnectRejectReason,
 } from "../vendor/platform-auth/app-connect";
+import { decodeBase58 } from "../vendor/platform-auth/app-connect/primitives";
+import { loginWithPrivateKey } from "./loginWithPrivateKey";
+import { loadSdkModule } from "./sdkModule";
 import type { DashAuth, DashSdk } from "./types";
 
 /** The App Connect system contract: where wallets publish `loginKeyResponse`. */
@@ -45,10 +63,14 @@ export interface ChainClock {
 
 /** Chain time and protocol version, from a proved read of `contractId`. */
 export async function readChainClock(
-  _sdk: DashSdk,
-  _contractId: string,
+  sdk: DashSdk,
+  contractId: string,
 ): Promise<ChainClock> {
-  throw new Error("not implemented");
+  const result = await sdk.contracts.fetchWithProof(contractId);
+  return {
+    timeMs: Number(result.metadata.timeMs),
+    protocolVersion: result.metadata.protocolVersion,
+  };
 }
 
 export interface WalletLoginRequest {
@@ -73,45 +95,165 @@ export interface WalletLoginRequest {
  * A fresh request: one HIGH authentication key bound to `contractId` (which
  * is also the app id), with the default allowance and lifetime proposed.
  */
-export function newWalletLoginRequest(_params: {
+export function newWalletLoginRequest(params: {
   contractId: string;
   connectionId: Uint8Array;
   chainNow: number;
   identityHint?: string;
   now?: number;
 }): WalletLoginRequest {
-  throw new Error("not implemented");
+  const { contractId, connectionId, chainNow, identityHint } = params;
+  const createdAt = params.now ?? Date.now();
+  const appEphemeralPrivateKey = secp256k1.utils.randomSecretKey();
+  const request: AppConnectRequest = {
+    appEphemeralPubKey: secp256k1.getPublicKey(appEphemeralPrivateKey, true),
+    appId: decodeBase58(contractId),
+    label: APP_CONNECT_LABEL,
+    authBindings: [
+      {
+        kind: "singleContract",
+        id: decodeBase58(contractId),
+        securityLevel: KeySecurityLevel.HIGH,
+        totalBudget: DEFAULT_BUDGET_CREDITS,
+        expiresAt: chainNow + DEFAULT_LIFETIME_MS,
+      },
+    ],
+    encBindings: [],
+    createdAt,
+    connectionId,
+  };
+  if (identityHint) request.identityHint = decodeBase58(identityHint);
+
+  return {
+    request,
+    uri: buildAppConnectUri(request, NETWORK),
+    requestHash: appConnectRequestHash(request),
+    createdAt,
+    expiresAt: createdAt + APP_CONNECT_MAX_REQUEST_AGE_MS,
+    chainTimeAtCreation: chainNow,
+    identityHint: identityHint ?? null,
+    appEphemeralPrivateKey,
+  };
 }
 
-export function disposeWalletLoginRequest(_req: WalletLoginRequest): void {
-  throw new Error("not implemented");
+export function disposeWalletLoginRequest(req: WalletLoginRequest): void {
+  req.appEphemeralPrivateKey.fill(0);
+}
+
+function abortError(): DOMException {
+  return new DOMException("cancelled", "AbortError");
 }
 
 /** Cuts a poll's wait short, e.g. when the tab regains focus. */
 export class PollTrigger {
+  private pending = false;
+  private wake: (() => void) | null = null;
+
   fire(): void {
-    throw new Error("not implemented");
+    if (this.wake) this.wake();
+    else this.pending = true;
   }
 
-  wait(_ms: number, _signal?: AbortSignal): Promise<void> {
-    throw new Error("not implemented");
+  wait(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(abortError());
+        return;
+      }
+      if (this.pending) {
+        this.pending = false;
+        resolve();
+        return;
+      }
+      const settle = (aborted: boolean) => {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        if (this.wake === onWake) this.wake = null;
+        if (aborted) reject(abortError());
+        else resolve();
+      };
+      const onWake = () => settle(false);
+      const onAbort = () => settle(true);
+      const timer = setTimeout(onWake, ms);
+      this.wake = onWake;
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
   }
 }
 
 export type WalletPollStatus = "waiting" | "answered" | "incomplete-read";
 
-export class RequestExpiredError extends Error {}
-export class TooManyAnswersError extends Error {}
-export class AmbiguousWalletAnswerError extends Error {
-  identityIds: string[] = [];
+export class RequestExpiredError extends Error {
+  constructor() {
+    super("No answer from your wallet yet. Start again for a fresh code.");
+    this.name = "RequestExpiredError";
+  }
 }
+
+export class TooManyAnswersError extends Error {
+  constructor() {
+    super("Too many answers arrived for this request. Start again.");
+    this.name = "TooManyAnswersError";
+  }
+}
+
+export class AmbiguousWalletAnswerError extends Error {
+  identityIds: string[];
+
+  constructor(identityIds: string[]) {
+    super(
+      "More than one identity answered this request, so none was used. Start again.",
+    );
+    this.name = "AmbiguousWalletAnswerError";
+    this.identityIds = identityIds;
+  }
+}
+
+const REFUSAL_MESSAGES: Partial<Record<AppConnectRejectReason, string>> = {
+  "invalid-key": "Your wallet sent a key that is not valid.",
+  "key-disabled": "The key your wallet sent is already disabled.",
+  "key-master": "Your wallet sent a master key; Dashnote never accepts one.",
+  "key-purpose": "The key your wallet sent is not an authentication key.",
+  "key-type": "The key your wallet sent has a type Dashnote cannot sign with.",
+  "key-unbound": "The key your wallet sent is not limited to Dashnote.",
+  "key-unmatched": "The key your wallet sent is limited to another app.",
+  "key-level": "The key your wallet sent has the wrong security level.",
+  "key-limits": "The key your wallet sent has no spending limit or no expiry.",
+  "key-expired": "The key your wallet sent expires too soon.",
+  "budget-exhausted": "The key your wallet sent has no allowance left.",
+  "duplicate-binding": "Your wallet sent the same key twice.",
+  "primary-missing": "Your wallet did not send a key for Dashnote.",
+};
+
 export class WalletAnswerRefusedError extends Error {
-  reason: AppConnectRejectReason = "framing";
+  reason: AppConnectRejectReason;
+
+  constructor(reason: AppConnectRejectReason) {
+    super(
+      REFUSAL_MESSAGES[reason] ??
+        `Your wallet's answer could not be used (${reason}).`,
+    );
+    this.name = "WalletAnswerRefusedError";
+    this.reason = reason;
+  }
 }
 
 export interface WalletAnswer {
   identityId: string;
   grant: AppConnectGrant;
+}
+
+// Rejections that mean "this response is for some other request".
+const NOT_AN_ANSWER: ReadonlySet<AppConnectRejectReason> = new Set([
+  "decrypt",
+  "framing",
+  "hint-mismatch",
+]);
+
+function wipeGrant(grant: AppConnectGrant): void {
+  for (const granted of [...grant.authKeys, ...grant.encryptionKeys]) {
+    granted.privateKey.fill(0);
+  }
 }
 
 /**
@@ -122,9 +264,9 @@ export interface WalletAnswer {
  * AbortError DOMException on `signal`.
  */
 export async function awaitWalletAnswer(
-  _sdk: DashSdk,
-  _req: WalletLoginRequest,
-  _options: {
+  sdk: DashSdk,
+  req: WalletLoginRequest,
+  options: {
     signal?: AbortSignal;
     trigger?: PollTrigger;
     onStatus?: (status: WalletPollStatus) => void;
@@ -132,7 +274,96 @@ export async function awaitWalletAnswer(
     now?: () => number;
   } = {},
 ): Promise<WalletAnswer> {
-  throw new Error("not implemented");
+  const { signal, onStatus, settleMs = 3000, now = Date.now } = options;
+  const trigger = options.trigger ?? new PollTrigger();
+  const responses = responsePort(sdk);
+  const identity = identityPort(sdk);
+  const hint = req.identityHint ?? undefined;
+
+  const decided = new Set<string>();
+  const responders = new Set<string>();
+  const answers = new Map<string, WalletAnswer | WalletAnswerRefusedError>();
+  let returned: WalletAnswer | null = null;
+  let firstAnswerAt: number | null = null;
+
+  try {
+    for (;;) {
+      if (signal?.aborted) throw abortError();
+
+      const page = await listAppConnectCandidates(
+        responses,
+        req.requestHash,
+        hint ? { hint } : {},
+      ).catch(() => null);
+      if (signal?.aborted) throw abortError();
+      if (page?.truncated) throw new TooManyAnswersError();
+
+      for (const candidate of page?.candidates ?? []) {
+        const key = appConnectCandidateKey(candidate);
+        if (decided.has(key)) continue;
+        const verdict = await verifyAppConnectCandidate({
+          request: req.request,
+          appEphemeralPrivateKey: req.appEphemeralPrivateKey,
+          candidate,
+          identity,
+          now: req.chainTimeAtCreation + (now() - req.createdAt),
+        });
+        if (!verdict.ok && NOT_AN_ANSWER.has(verdict.reason)) {
+          decided.add(key);
+          continue;
+        }
+        responders.add(candidate.ownerId);
+        if (!verdict.ok && verdict.retryable) continue;
+        decided.add(key);
+        const previous = answers.get(candidate.ownerId);
+        if (previous && !(previous instanceof Error)) wipeGrant(previous.grant);
+        answers.set(
+          candidate.ownerId,
+          verdict.ok
+            ? { identityId: candidate.ownerId, grant: verdict.grant }
+            : new WalletAnswerRefusedError(verdict.reason),
+        );
+      }
+      if (signal?.aborted) throw abortError();
+
+      if (responders.size > 1) {
+        throw new AmbiguousWalletAnswerError([...responders]);
+      }
+
+      const answer = answers.values().next().value;
+      if (answer && firstAnswerAt === null) firstAnswerAt = now();
+      onStatus?.(
+        page === null ? "incomplete-read" : answer ? "answered" : "waiting",
+      );
+
+      const settled =
+        answer !== undefined &&
+        page !== null &&
+        (hint !== undefined || now() - (firstAnswerAt ?? 0) >= settleMs);
+      const elapsed = now() - req.createdAt;
+      const delay = appConnectPollDelayMs(elapsed);
+      const expired = delay === null || now() >= req.expiresAt;
+      if (answer && (settled || expired)) {
+        if (answer instanceof Error) throw answer;
+        returned = answer;
+        return answer;
+      }
+      if (expired) throw new RequestExpiredError();
+
+      const untilSettled =
+        answer && firstAnswerAt !== null
+          ? Math.max(0, settleMs - (now() - firstAnswerAt))
+          : delay;
+      await trigger.wait(Math.min(delay, untilSettled), signal);
+    }
+  } finally {
+    for (const answer of answers.values()) {
+      if (answer !== returned && !(answer instanceof Error)) {
+        wipeGrant(answer.grant);
+      }
+    }
+    disposeWalletLoginRequest(req);
+  }
 }
 
 /** What the wallet granted, as the Settings panel shows it. */
@@ -151,41 +382,248 @@ export interface WalletLogin {
   grant: WalletGrant;
 }
 
+function boundContractId(bounds: AppConnectKeyBounds | undefined): string {
+  if (!bounds || bounds.kind === "contractGroup") return "";
+  return bounds.contractId;
+}
+
 /**
  * Turns a verified answer into a one-key session via loginWithPrivateKey,
  * exactly as a pasted WIF does, and wipes the grant's private key bytes.
  */
 export async function loginWithWalletAnswer(
-  _sdk: DashSdk,
-  _answer: WalletAnswer,
+  sdk: DashSdk,
+  answer: WalletAnswer,
 ): Promise<WalletLogin> {
-  throw new Error("not implemented");
+  const { grant } = answer;
+  try {
+    const granted = grant.authKeys[0];
+    if (!granted) throw new Error("The wallet's answer carries no key.");
+    const { PrivateKey } = await loadSdkModule();
+    const wif = PrivateKey.fromBytes(granted.privateKey, NETWORK).toWIF();
+    const { identityId, ...auth } = await loginWithPrivateKey(
+      sdk,
+      wif,
+      answer.identityId,
+    );
+    return {
+      identityId,
+      auth,
+      grant: {
+        keyId: granted.key.id,
+        contractId: boundContractId(granted.key.bounds),
+        totalBudget: granted.key.totalBudget ?? null,
+        remainingBudget: granted.remainingBudget ?? null,
+        expiresAt: granted.key.expiresAt ?? null,
+      },
+    };
+  } finally {
+    wipeGrant(grant);
+  }
 }
 
 /** The grant's current limits, or null when the key is gone or disabled. */
 export async function readWalletGrant(
-  _sdk: DashSdk,
-  _identityId: string,
-  _keyId: number,
+  sdk: DashSdk,
+  identityId: string,
+  keyId: number,
 ): Promise<WalletGrant | null> {
-  throw new Error("not implemented");
+  const { data } = await sdk.identities.fetchWithProof(identityId);
+  const raw = (data?.publicKeys as unknown as SdkKey[] | undefined)?.find(
+    (k) => k.keyId === keyId,
+  );
+  if (!raw) return null;
+  const key = toIdentityKey(raw);
+  if (key.disabledAt !== undefined) return null;
+  let remainingBudget: bigint | null = null;
+  if (key.totalBudget !== undefined) {
+    const budgets = await sdk.identities.keysRemainingBudgets(identityId, [
+      keyId,
+    ]);
+    remainingBudget = budgets.get(keyId) ?? null;
+  }
+  return {
+    keyId,
+    contractId: boundContractId(key.bounds),
+    totalBudget: key.totalBudget ?? null,
+    remainingBudget,
+    expiresAt: key.expiresAt ?? null,
+  };
 }
 
 export type WalletWriteAction = "renew" | "logout" | null;
+
+function consensusCodeOf(err: unknown): number | null {
+  const code = (err as { code?: unknown } | null)?.code;
+  if (typeof code === "number") return code;
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  const match = /\b(\d{5})\b/.exec(message);
+  return match ? Number(match[1]) : null;
+}
 
 /**
  * What a failed write means for a wallet session: "renew" when the key's
  * allowance or expiry stopped it, "logout" when the key is disabled or gone,
  * null for anything else.
  */
-export function classifyWalletWriteError(_err: unknown): WalletWriteAction {
-  throw new Error("not implemented");
+export function classifyWalletWriteError(err: unknown): WalletWriteAction {
+  const action = classifyAppConnectError(consensusCodeOf(err))?.action;
+  if (action === "renew" || action === "logout") return action;
+  return null;
 }
 
-export function identityPort(_sdk: DashSdk): AppConnectIdentityPort {
-  throw new Error("not implemented");
+/** The fields of the SDK's IdentityPublicKey this file reads. */
+interface SdkKey {
+  keyId: number;
+  keyTypeNumber: number;
+  purposeNumber: number;
+  securityLevelNumber: number;
+  /** Hex. */
+  data: string;
+  disabledAt?: bigint | number;
+  totalBudget?: bigint;
+  expiresAt?: bigint | number;
+  contractBounds?: {
+    contractBoundsType: string;
+    identifier: unknown;
+    documentTypeName?: string;
+  };
 }
 
-export function responsePort(_sdk: DashSdk): AppConnectResponsePort {
-  throw new Error("not implemented");
+function hexToBytes(hex: string): Uint8Array {
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i += 1) {
+    out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+function toBounds(
+  bounds: SdkKey["contractBounds"],
+): AppConnectKeyBounds | undefined {
+  if (!bounds) return undefined;
+  const id = String(bounds.identifier);
+  switch (bounds.contractBoundsType) {
+    case "singleContract":
+      return { kind: "singleContract", contractId: id };
+    case "documentType":
+      return {
+        kind: "documentType",
+        contractId: id,
+        documentTypeName: bounds.documentTypeName ?? "",
+      };
+    case "contractGroup":
+      return { kind: "contractGroup", groupId: id };
+    default:
+      return undefined;
+  }
+}
+
+function toIdentityKey(k: SdkKey): AppConnectIdentityKey {
+  return {
+    id: k.keyId,
+    type: k.keyTypeNumber,
+    purpose: k.purposeNumber,
+    securityLevel: k.securityLevelNumber,
+    data: hexToBytes(k.data),
+    disabledAt: k.disabledAt === undefined ? undefined : Number(k.disabledAt),
+    totalBudget: k.totalBudget,
+    expiresAt: k.expiresAt === undefined ? undefined : Number(k.expiresAt),
+    bounds: toBounds(k.contractBounds),
+  };
+}
+
+export function identityPort(sdk: DashSdk): AppConnectIdentityPort {
+  return {
+    async getIdentityFresh(identityId) {
+      const { data } = await sdk.identities.fetchWithProof(identityId);
+      if (data === undefined) return null;
+      const keys = data.publicKeys as unknown as SdkKey[];
+      return { id: identityId, publicKeys: keys.map(toIdentityKey) };
+    },
+    async remainingBudgets(identityId, keyIds) {
+      const budgets = await sdk.identities.keysRemainingBudgets(
+        identityId,
+        keyIds,
+      );
+      return new Map(
+        [...budgets].map(([keyId, left]) => [keyId, left ?? undefined]),
+      );
+    },
+    async contractKeys(identityId, contractId, purpose) {
+      const result = await sdk.identities.contractKeys({
+        identityIds: [identityId],
+        contractId,
+        purposes: [purpose],
+      });
+      const keys = (result[0]?.keys ?? []) as unknown as SdkKey[];
+      return keys.map(toIdentityKey);
+    },
+    // Dashnote asks for no contractGroup binding, so no group is ever read.
+    async groupInfo() {
+      return null;
+    },
+  };
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes));
+}
+
+function toBytes(value: unknown): Uint8Array | null {
+  if (value instanceof Uint8Array) return value;
+  if (typeof value === "string") {
+    try {
+      return Uint8Array.from(atob(value), (c) => c.charCodeAt(0));
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+interface ResponseDocument {
+  ownerId?: unknown;
+  properties?: Record<string, unknown>;
+}
+
+function toCandidate(doc: ResponseDocument): AppConnectCandidate | null {
+  const walletEphemeralPubKey = toBytes(doc.properties?.walletEphemeralPubKey);
+  const encryptedPayload = toBytes(doc.properties?.encryptedPayload);
+  if (!doc.ownerId || !walletEphemeralPubKey || !encryptedPayload) return null;
+  return {
+    ownerId: String(doc.ownerId),
+    walletEphemeralPubKey,
+    encryptedPayload,
+  };
+}
+
+export function responsePort(sdk: DashSdk): AppConnectResponsePort {
+  return {
+    async listCandidates(requestHash, hint, startAfter, limit) {
+      const where: unknown[][] = [
+        ["appEphemeralPubKeyHash", "==", bytesToBase64(requestHash)],
+      ];
+      if (hint !== undefined) where.push(["$ownerId", "==", hint]);
+      else if (startAfter !== undefined) {
+        where.push(["$ownerId", ">", startAfter]);
+      }
+      const results: unknown = await sdk.documents.query({
+        dataContractId: APP_CONNECT_CONTRACT_ID,
+        documentTypeName: "loginKeyResponse",
+        where,
+        orderBy: [["$ownerId", "asc"]],
+        limit,
+      });
+      const docs = Array.isArray(results)
+        ? results
+        : results instanceof Map
+          ? [...results.values()]
+          : Object.values((results ?? {}) as Record<string, unknown>);
+      return docs
+        .filter(Boolean)
+        .map((doc) => toCandidate(doc as ResponseDocument))
+        .filter((c): c is AppConnectCandidate => c !== null);
+    },
+  };
 }

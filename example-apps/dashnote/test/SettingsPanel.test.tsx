@@ -43,6 +43,9 @@ interface SessionOverrides {
   forgetIdentity?: ReturnType<typeof vi.fn>;
   logout?: ReturnType<typeof vi.fn>;
   log?: ReturnType<typeof vi.fn>;
+  walletGrant?: unknown;
+  walletNotice?: "renew" | null;
+  refreshWalletGrant?: ReturnType<typeof vi.fn>;
 }
 
 function makeSession(overrides: SessionOverrides = {}) {
@@ -62,6 +65,9 @@ function makeSession(overrides: SessionOverrides = {}) {
     enterReadOnly: vi.fn(),
     viewAsRemembered: vi.fn(),
     forgetIdentity: vi.fn(),
+    walletGrant: null,
+    walletNotice: null,
+    refreshWalletGrant: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -81,7 +87,7 @@ describe("SettingsPanel", () => {
     mockUseSession.mockReturnValue(
       makeSession({ identityId: "id-abc", dpnsName: "alice" }),
     );
-    render(<SettingsPanel onOpenLogin={vi.fn()} />);
+    render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
     const block = screen.getByTestId("settings-identity-block");
     expect(within(block).getByText("id-abc")).toBeTruthy();
     expect(within(block).getByText("✓ alice.dash")).toBeTruthy();
@@ -91,14 +97,14 @@ describe("SettingsPanel", () => {
     mockUseSession.mockReturnValue(
       makeSession({ identityId: "id-abc", dpnsName: null }),
     );
-    render(<SettingsPanel onOpenLogin={vi.fn()} />);
+    render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
     const block = screen.getByTestId("settings-identity-block");
     expect(within(block).queryByText(/\.dash$/)).toBeNull();
   });
 
   it("renders the network indicator as testnet", () => {
     mockUseSession.mockReturnValue(makeSession());
-    render(<SettingsPanel onOpenLogin={vi.fn()} />);
+    render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
     expect(screen.getByText("testnet")).toBeTruthy();
   });
 
@@ -107,7 +113,9 @@ describe("SettingsPanel", () => {
       makeSession({ status: "readonly", identityId: null, keyManager: null }),
     );
     const onOpenLogin = vi.fn();
-    render(<SettingsPanel onOpenLogin={onOpenLogin} />);
+    render(
+      <SettingsPanel onOpenLogin={onOpenLogin} onRenewInWallet={vi.fn()} />,
+    );
     expect(screen.getByText(/sign in to view/i)).toBeTruthy();
     expect(screen.queryByTestId("settings-identity-block")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }));
@@ -116,7 +124,7 @@ describe("SettingsPanel", () => {
 
   it("hides the danger zone when nothing is remembered", () => {
     mockUseSession.mockReturnValue(makeSession({ rememberedIdentityId: null }));
-    render(<SettingsPanel onOpenLogin={vi.fn()} />);
+    render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
     expect(
       screen.queryByRole("button", { name: /forget this device/i }),
     ).toBeNull();
@@ -130,7 +138,7 @@ describe("SettingsPanel", () => {
         forgetIdentity,
       }),
     );
-    render(<SettingsPanel onOpenLogin={vi.fn()} />);
+    render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
     fireEvent.click(
       screen.getByRole("button", { name: /forget this device/i }),
     );
@@ -144,7 +152,7 @@ describe("SettingsPanel", () => {
       value: { writeText },
     });
     mockUseSession.mockReturnValue(makeSession({ identityId: "id-xyz" }));
-    render(<SettingsPanel onOpenLogin={vi.fn()} />);
+    render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /copy identity id/i }));
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith("id-xyz");
@@ -156,7 +164,7 @@ describe("SettingsPanel", () => {
     mockUseSession.mockReturnValue(
       makeSession({ contractId: "old", setContractId }),
     );
-    render(<SettingsPanel onOpenLogin={vi.fn()} />);
+    render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
     const input = screen.getByPlaceholderText(/paste a note contract id/i);
     fireEvent.change(input, { target: { value: " new-contract " } });
     fireEvent.click(screen.getByRole("button", { name: /use this id/i }));
@@ -172,7 +180,7 @@ describe("SettingsPanel", () => {
     mockUseSession.mockReturnValue(
       makeSession({ setContractId, sdk, keyManager, log }),
     );
-    render(<SettingsPanel onOpenLogin={vi.fn()} />);
+    render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
     fireEvent.click(
       screen.getByRole("button", { name: /register a fresh contract/i }),
     );
@@ -200,7 +208,7 @@ describe("SettingsPanel", () => {
         }),
     );
     mockUseSession.mockReturnValue(makeSession({ setContractId: vi.fn() }));
-    render(<SettingsPanel onOpenLogin={vi.fn()} />);
+    render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
     const button = screen.getByRole("button", {
       name: /register a fresh contract/i,
     });
@@ -217,7 +225,7 @@ describe("SettingsPanel", () => {
     const setContractId = vi.fn();
     mockRegisterContract.mockRejectedValue(new Error("Network down"));
     mockUseSession.mockReturnValue(makeSession({ setContractId }));
-    render(<SettingsPanel onOpenLogin={vi.fn()} />);
+    render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
     fireEvent.click(
       screen.getByRole("button", { name: /register a fresh contract/i }),
     );
@@ -227,12 +235,90 @@ describe("SettingsPanel", () => {
 
   it("invokes clearCachedNotes with the current identity ID", () => {
     mockUseSession.mockReturnValue(makeSession({ identityId: "id-cache" }));
-    render(<SettingsPanel onOpenLogin={vi.fn()} />);
+    render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
     fireEvent.click(
       screen.getByRole("button", {
         name: /clear local cache for this device/i,
       }),
     );
     expect(mockClearCachedNotes).toHaveBeenCalledWith("id-cache");
+  });
+
+  describe("wallet connection", () => {
+    const grant = {
+      keyId: 7,
+      contractId: "8d6heK6CoskLBi6Rs7cChRG9RuckcZqZst28BdviBe8y",
+      totalBudget: 10_000_000_000n,
+      remainingBudget: 2_500_000_000n,
+      expiresAt: Date.UTC(2027, 1, 20, 12),
+    };
+
+    it("is hidden for a mnemonic or WIF session", () => {
+      mockUseSession.mockReturnValue(makeSession());
+      render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
+      expect(screen.queryByText("Wallet connection")).toBeNull();
+    });
+
+    it("shows what the wallet granted", () => {
+      mockUseSession.mockReturnValue(makeSession({ walletGrant: grant }));
+      render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
+      const block = screen.getByTestId("wallet-connection");
+      expect(block.textContent).toContain("0.0250 of 0.1000 DASH");
+      expect(block.textContent).toContain(
+        new Date(grant.expiresAt).toLocaleDateString(),
+      );
+      expect(block.textContent).toContain("7");
+      expect(block.textContent).toContain("8d6heK6Cos…BdviBe8y");
+    });
+
+    it("shows a grant without limits", () => {
+      mockUseSession.mockReturnValue(
+        makeSession({
+          walletGrant: {
+            ...grant,
+            totalBudget: null,
+            remainingBudget: null,
+            expiresAt: null,
+          },
+        }),
+      );
+      render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
+      const block = screen.getByTestId("wallet-connection");
+      expect(block.textContent).toContain("no limit");
+      expect(block.textContent).toContain("never");
+    });
+
+    it("refreshes the grant and opens the renewal", async () => {
+      const refreshWalletGrant = vi.fn().mockResolvedValue(undefined);
+      const onRenewInWallet = vi.fn();
+      mockUseSession.mockReturnValue(
+        makeSession({ walletGrant: grant, refreshWalletGrant }),
+      );
+      render(
+        <SettingsPanel
+          onOpenLogin={vi.fn()}
+          onRenewInWallet={onRenewInWallet}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+      await waitFor(() => expect(refreshWalletGrant).toHaveBeenCalledTimes(1));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy(),
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Renew in DashPay" }));
+      expect(onRenewInWallet).toHaveBeenCalledTimes(1);
+    });
+
+    it("explains why the last write stopped", () => {
+      mockUseSession.mockReturnValue(
+        makeSession({ walletGrant: grant, walletNotice: "renew" }),
+      );
+      render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
+      expect(screen.getByRole("alert").textContent).toMatch(
+        /ran out of allowance or expired/,
+      );
+    });
   });
 });

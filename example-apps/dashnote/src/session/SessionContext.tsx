@@ -13,6 +13,7 @@ import {
   refreshContractCache,
   saveContractId,
 } from "../dash/contract";
+import type { WalletGrant, WalletLogin } from "../dash/appConnect";
 import { resolveDpnsName } from "../dash/resolveDpnsName";
 import type { DashKeyManager, DashSdk } from "../dash/types";
 import { detectSecretShape } from "../lib/detectSecretShape";
@@ -52,6 +53,20 @@ function loadSdkModule(): Promise<SdkModule> {
   return sdkModulePromise;
 }
 
+// appConnect pulls in loginWithPrivateKey and with it @dashevo/evo-sdk, so
+// it is only ever loaded on demand, like the WIF path in login().
+type AppConnectModule = typeof import("../dash/appConnect");
+let appConnectPromise: Promise<AppConnectModule> | null = null;
+function loadAppConnect(): Promise<AppConnectModule> {
+  if (!appConnectPromise) {
+    appConnectPromise = import("../dash/appConnect").catch((err) => {
+      appConnectPromise = null;
+      throw err;
+    });
+  }
+  return appConnectPromise;
+}
+
 export type SessionStatus =
   | "idle"
   | "connecting"
@@ -66,6 +81,8 @@ export interface LoginOptions {
   expectedIdentityId?: string;
 }
 
+export type WalletNotice = "renew";
+
 export interface SessionValue {
   status: SessionStatus;
   error: string | null;
@@ -75,11 +92,20 @@ export interface SessionValue {
   contractId: string | null;
   rememberedIdentityId: string | null;
   dpnsName: string | null;
+  walletGrant: WalletGrant | null;
+  walletNotice: WalletNotice | null;
   setContractId: (id: string | null) => void;
   log: Logger;
   activityLog: LogEntry[];
   clearActivityLog: () => void;
   login: (secret: string, options?: LoginOptions) => Promise<void>;
+  loginWithWallet: (
+    login: WalletLogin,
+    options?: { rememberMe?: boolean },
+  ) => Promise<void>;
+  refreshWalletGrant: () => Promise<void>;
+  reportWriteError: (err: unknown) => Promise<"renew" | "logout" | null>;
+  dismissWalletNotice: () => void;
   enterReadOnly: () => Promise<void>;
   viewAsRemembered: () => Promise<void>;
   forgetIdentity: () => void;
@@ -109,6 +135,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [dpnsName, setDpnsName] = useState<string | null>(
     initialRemembered?.name ?? null,
   );
+
+  const [walletGrant, setWalletGrant] = useState<WalletGrant | null>(null);
+  const [walletNotice, setWalletNotice] = useState<WalletNotice | null>(null);
 
   const [activityLog, setActivityLog] = useState<LogEntry[]>([]);
 
@@ -178,15 +207,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return connected;
   }, [log]);
 
-  const login = useCallback(
-    async (secret: string, options: LoginOptions = {}) => {
-      const {
-        identityIndex = 0,
-        rememberMe = false,
-        expectedIdentityId,
-      } = options;
-      const trimmed = secret.trim();
-      if (!trimmed) throw new Error("Secret is required.");
+  // Shared by every sign-in path: `resolve` turns a connected SDK into a key
+  // manager, and everything after that (DPNS caption, remember-me, failure
+  // restore) is the same whether the key came from a mnemonic, a WIF, or a
+  // wallet grant.
+  const authenticate = useCallback(
+    async (
+      resolve: (
+        connected: DashSdk,
+      ) => Promise<{ keyManager: DashKeyManager; detail: string }>,
+      { rememberMe, grant }: { rememberMe: boolean; grant: WalletGrant | null },
+    ) => {
       // Snapshot session state so a failed login can restore the user's
       // prior context instead of clobbering it. Without this, mistyping a
       // key while in browsing/authenticated mode silently logs the user out.
@@ -194,50 +225,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const priorKeyManager = keyManager;
       const priorIdentityId = identityId;
       const priorDpnsName = dpnsName;
+      const priorWalletGrant = walletGrant;
+      const priorWalletNotice = walletNotice;
       setError(null);
       try {
         const connected = sdk ?? (await connect());
-
-        // Detect whether the user pasted a mnemonic or a WIF private key
-        // and dispatch accordingly. identityIndex only applies to mnemonic
-        // input (DIP-13 derivation); a single WIF identifies one key
-        // directly so the index is irrelevant in that path.
-        const shape = detectSecretShape(trimmed);
-
-        let resolvedKeyManager: DashKeyManager;
-        if (shape === "mnemonic") {
-          const { IdentityKeyManager } = await loadSdkModule();
-          resolvedKeyManager = (await IdentityKeyManager.create({
-            sdk: connected as never,
-            mnemonic: trimmed,
-            network: "testnet",
-            identityIndex,
-          })) as unknown as DashKeyManager;
-        } else {
-          // Dynamic import keeps loginWithPrivateKey (and its transitive
-          // @dashevo/evo-sdk dependency) out of the app shell. The mnemonic
-          // branch already pays the SDK fetch via loadSdkModule(); for WIF
-          // we fetch this module on first use here.
-          const { loginWithPrivateKey } =
-            await import("../dash/loginWithPrivateKey");
-          const auth = await loginWithPrivateKey(
-            connected,
-            trimmed,
-            expectedIdentityId,
-          );
-          resolvedKeyManager = keyManagerFromKey(auth.identityId, auth);
-        }
+        const { keyManager: resolvedKeyManager, detail } =
+          await resolve(connected);
 
         setKeyManager(resolvedKeyManager);
+        setWalletGrant(grant);
+        setWalletNotice(null);
         const resolvedId = resolvedKeyManager.identityId ?? null;
         setIdentityId(resolvedId ?? null);
         setStatus("authenticated");
         log(`Identity resolved: ${resolvedId ?? "(unknown)"}`, {
           level: "success",
-          detail:
-            shape === "mnemonic"
-              ? "IdentityKeyManager.create"
-              : "loginWithPrivateKey",
+          detail,
         });
 
         // Resolve the DPNS name after auth so we can persist it alongside
@@ -274,23 +278,109 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           setKeyManager(priorKeyManager);
           setIdentityId(priorIdentityId);
           setDpnsName(priorDpnsName);
+          setWalletGrant(priorWalletGrant);
+          setWalletNotice(priorWalletNotice);
           setStatus(priorStatus);
         } else if (remembered) {
           setKeyManager(null);
           setIdentityId(remembered.id);
           setDpnsName(remembered.name ?? null);
+          setWalletGrant(null);
+          setWalletNotice(null);
           setStatus("browsing");
         } else {
           setKeyManager(priorKeyManager);
           setIdentityId(priorIdentityId);
           setDpnsName(priorDpnsName);
+          setWalletGrant(priorWalletGrant);
+          setWalletNotice(priorWalletNotice);
           setStatus(priorStatus);
         }
         log(`Login failed: ${message}`, "error");
         throw err;
       }
     },
-    [sdk, status, keyManager, identityId, dpnsName, connect, log],
+    [
+      sdk,
+      status,
+      keyManager,
+      identityId,
+      dpnsName,
+      walletGrant,
+      walletNotice,
+      connect,
+      log,
+    ],
+  );
+
+  const login = useCallback(
+    async (secret: string, options: LoginOptions = {}) => {
+      const {
+        identityIndex = 0,
+        rememberMe = false,
+        expectedIdentityId,
+      } = options;
+      const trimmed = secret.trim();
+      if (!trimmed) throw new Error("Secret is required.");
+      await authenticate(
+        async (connected) => {
+          // Detect whether the user pasted a mnemonic or a WIF private key
+          // and dispatch accordingly. identityIndex only applies to mnemonic
+          // input (DIP-13 derivation); a single WIF identifies one key
+          // directly so the index is irrelevant in that path.
+          const shape = detectSecretShape(trimmed);
+          if (shape === "mnemonic") {
+            const { IdentityKeyManager } = await loadSdkModule();
+            const resolved = (await IdentityKeyManager.create({
+              sdk: connected as never,
+              mnemonic: trimmed,
+              network: "testnet",
+              identityIndex,
+            })) as unknown as DashKeyManager;
+            return {
+              keyManager: resolved,
+              detail: "IdentityKeyManager.create",
+            };
+          }
+          // Dynamic import keeps loginWithPrivateKey (and its transitive
+          // @dashevo/evo-sdk dependency) out of the app shell. The mnemonic
+          // branch already pays the SDK fetch via loadSdkModule(); for WIF
+          // we fetch this module on first use here.
+          const { loginWithPrivateKey } =
+            await import("../dash/loginWithPrivateKey");
+          const auth = await loginWithPrivateKey(
+            connected,
+            trimmed,
+            expectedIdentityId,
+          );
+          return {
+            keyManager: keyManagerFromKey(auth.identityId, auth),
+            detail: "loginWithPrivateKey",
+          };
+        },
+        { rememberMe, grant: null },
+      );
+    },
+    [authenticate],
+  );
+
+  const loginWithWallet = useCallback(
+    async (
+      walletLogin: WalletLogin,
+      options: { rememberMe?: boolean } = {},
+    ) => {
+      await authenticate(
+        async () => ({
+          keyManager: keyManagerFromKey(
+            walletLogin.identityId,
+            walletLogin.auth,
+          ),
+          detail: "loginWithWalletAnswer",
+        }),
+        { rememberMe: options.rememberMe ?? false, grant: walletLogin.grant },
+      );
+    },
+    [authenticate],
   );
 
   const enterReadOnly = useCallback(async () => {
@@ -371,6 +461,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     setKeyManager(null);
+    setWalletGrant(null);
+    setWalletNotice(null);
     setError(null);
     if (rememberedIdentityId) {
       setIdentityId(rememberedIdentityId);
@@ -384,6 +476,57 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     log("Logged out.");
   }, [sdk, rememberedIdentityId, log]);
 
+  const refreshWalletGrant = useCallback(async () => {
+    if (!walletGrant || !identityId || !sdk) return;
+    const keyId = walletGrant.keyId;
+    try {
+      const { readWalletGrant } = await loadAppConnect();
+      const fresh = await readWalletGrant(sdk, identityId, keyId);
+      if (!fresh) {
+        log("Your wallet disabled this key.", "error");
+        logout();
+        return;
+      }
+      // Ignore a result for a grant that was replaced while we were reading.
+      setWalletGrant((current) =>
+        current && current.keyId === keyId ? fresh : current,
+      );
+    } catch (err) {
+      log(`Couldn't refresh the wallet connection: ${errorMessage(err)}`, {
+        level: "error",
+        detail: "readWalletGrant",
+      });
+    }
+  }, [walletGrant, identityId, sdk, log, logout]);
+
+  const reportWriteError = useCallback(
+    async (err: unknown): Promise<"renew" | "logout" | null> => {
+      if (!walletGrant) return null;
+      let action: "renew" | "logout" | null;
+      try {
+        const { classifyWalletWriteError } = await loadAppConnect();
+        action = classifyWalletWriteError(err);
+      } catch {
+        // The write error is already on screen; nothing more to add.
+        return null;
+      }
+      if (action === "renew") {
+        setWalletNotice("renew");
+        log(
+          "This note needs more than your wallet key has left. Renew the connection in DashPay (Settings → Wallet connection).",
+          "error",
+        );
+      } else if (action === "logout") {
+        log("Your wallet revoked this browser's key. Sign in again.", "error");
+        logout();
+      }
+      return action;
+    },
+    [walletGrant, log, logout],
+  );
+
+  const dismissWalletNotice = useCallback(() => setWalletNotice(null), []);
+
   const value = useMemo<SessionValue>(
     () => ({
       status,
@@ -394,11 +537,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       contractId,
       rememberedIdentityId,
       dpnsName,
+      walletGrant,
+      walletNotice,
       setContractId,
       log,
       activityLog,
       clearActivityLog,
       login,
+      loginWithWallet,
+      refreshWalletGrant,
+      reportWriteError,
+      dismissWalletNotice,
       enterReadOnly,
       viewAsRemembered,
       forgetIdentity,
@@ -413,11 +562,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       contractId,
       rememberedIdentityId,
       dpnsName,
+      walletGrant,
+      walletNotice,
       setContractId,
       log,
       activityLog,
       clearActivityLog,
       login,
+      loginWithWallet,
+      refreshWalletGrant,
+      reportWriteError,
+      dismissWalletNotice,
       enterReadOnly,
       viewAsRemembered,
       forgetIdentity,

@@ -2,11 +2,23 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useContractRegistration } from "../hooks/useContractRegistration";
 import { useTheme } from "../hooks/useTheme";
+import { truncateId } from "../lib/format";
 import { clearCachedNotes } from "../lib/notesCache";
 import { useSession } from "../session/useSession";
 import { OperationResultNotice } from "./OperationResultNotice";
 
 const NETWORK = "testnet" as const;
+const CREDITS_PER_DASH = 100_000_000_000;
+
+function formatDash(credits: bigint): string {
+  return (Number(credits) / CREDITS_PER_DASH).toFixed(4);
+}
+
+function allowanceText(remaining: bigint | null, total: bigint | null): string {
+  if (remaining === null && total === null) return "no limit";
+  if (total === null) return `${formatDash(remaining ?? 0n)} DASH`;
+  return `${formatDash(remaining ?? 0n)} of ${formatDash(total)} DASH`;
+}
 
 interface CopyButtonProps {
   value: string | null;
@@ -78,10 +90,15 @@ function Section({
 
 interface SettingsPanelProps {
   onOpenLogin: () => void;
+  onRenewInWallet: () => void;
 }
 
-export function SettingsPanel({ onOpenLogin }: SettingsPanelProps) {
+export function SettingsPanel({
+  onOpenLogin,
+  onRenewInWallet,
+}: SettingsPanelProps) {
   const session = useSession();
+  const [refreshingGrant, setRefreshingGrant] = useState(false);
   const {
     register,
     registering,
@@ -156,6 +173,72 @@ export function SettingsPanel({ onOpenLogin }: SettingsPanelProps) {
           <span className="font-mono text-accent-dim">{NETWORK}</span>
         </div>
       </Section>
+
+      {session.walletGrant && (
+        <Section title="Wallet connection">
+          {session.walletNotice === "renew" && (
+            <OperationResultNotice tone="error" title="Renew needed">
+              This browser&apos;s key ran out of allowance or expired, so the
+              last write didn&apos;t go through. Renew the connection in DashPay
+              to keep writing.
+            </OperationResultNotice>
+          )}
+          <dl
+            data-testid="wallet-connection"
+            className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[11px]"
+          >
+            <dt className="text-ink-3">Allowance left</dt>
+            <dd className="text-right font-mono text-ink-2">
+              {allowanceText(
+                session.walletGrant.remainingBudget,
+                session.walletGrant.totalBudget,
+              )}
+            </dd>
+            <dt className="text-ink-3">Expires</dt>
+            <dd className="text-right font-mono text-ink-2">
+              {session.walletGrant.expiresAt === null
+                ? "never"
+                : new Date(session.walletGrant.expiresAt).toLocaleDateString()}
+            </dd>
+            <dt className="text-ink-3">Key id</dt>
+            <dd className="text-right font-mono text-ink-2">
+              {session.walletGrant.keyId}
+            </dd>
+            <dt className="text-ink-3">Contract</dt>
+            <dd className="text-right font-mono text-accent-dim">
+              {truncateId(session.walletGrant.contractId)}
+            </dd>
+          </dl>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={async () => {
+                setRefreshingGrant(true);
+                try {
+                  await session.refreshWalletGrant();
+                } finally {
+                  setRefreshingGrant(false);
+                }
+              }}
+              disabled={refreshingGrant}
+              className="rounded-md border border-line-2 bg-transparent px-3 py-1.5 text-[12px] font-semibold text-ink-2 transition hover:border-accent-dim hover:text-ink disabled:cursor-not-allowed disabled:border-line disabled:text-ink-4"
+            >
+              {refreshingGrant ? "Refreshing…" : "Refresh"}
+            </button>
+            <button
+              type="button"
+              onClick={onRenewInWallet}
+              className="rounded-md bg-accent px-3 py-1.5 text-[12px] font-semibold text-bg transition hover:bg-accent-dim"
+            >
+              Renew in DashPay
+            </button>
+          </div>
+          <p className="text-[11px] text-ink-4">
+            DashPay granted this browser one key that can only write notes to
+            this contract, within the allowance above.
+          </p>
+        </Section>
+      )}
 
       <Section title="Contract">
         <div className="flex flex-col gap-2">
