@@ -10,6 +10,12 @@ export interface DashAuth {
   signer: IdentitySigner;
 }
 
+/** A proved read: the data plus the block it was proved against. */
+export interface ProofResponse<T> {
+  data: T;
+  metadata: { timeMs: bigint; protocolVersion: number };
+}
+
 export interface DashKeyManager {
   readonly identityId: string | null | undefined;
   getAuth(): Promise<DashAuth>;
@@ -29,6 +35,7 @@ export interface DashSdk {
       toJSON?: () => Record<string, unknown>;
       [key: string]: unknown;
     } | null>;
+    fetchWithProof(contractId: string): Promise<ProofResponse<unknown>>;
     publish(args: {
       dataContract: unknown;
       identityKey: IdentityPublicKey | undefined;
@@ -75,6 +82,19 @@ export interface DashSdk {
   };
   identities: {
     fetch(identityId: string): Promise<Identity | null | undefined>;
+    fetchWithProof(
+      identityId: string,
+    ): Promise<ProofResponse<Identity | undefined>>;
+    /** Remaining credits per key id (protocol 14); null for a key without a budget. */
+    keysRemainingBudgets(
+      identityId: string,
+      keyIds: number[],
+    ): Promise<Map<number, bigint | null>>;
+    contractKeys(query: {
+      identityIds: string[];
+      contractId: string;
+      purposes?: number[];
+    }): Promise<{ identityId: unknown; keys: IdentityPublicKey[] }[]>;
     nonce(identityId: string): Promise<bigint | null | undefined>;
     byPublicKeyHash(
       publicKeyHash: Uint8Array,

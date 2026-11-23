@@ -34,7 +34,10 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["test/**/*.test.{ts,tsx}"],
+    include: [
+      "test/**/*.test.{ts,tsx}",
+      "src/vendor/platform-auth/**/*.test.ts",
+    ],
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
