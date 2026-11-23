@@ -2,7 +2,6 @@ import { toast } from "sonner";
 import {
   createContext,
   useCallback,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -141,17 +140,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [walletGrant, setWalletGrant] = useState<WalletGrant | null>(null);
   const [walletNotice, setWalletNotice] = useState<WalletNotice | null>(null);
 
-  // The grant a late wallet read or write error may still act on; anything
-  // that started under a different identity or key is discarded.
-  const walletKeyRef = useRef<{ identityId: string; keyId: number } | null>(
-    null,
+  // The grant a late wallet read, write error or contract switch may still
+  // act on. Kept in step with the state synchronously, so nothing that
+  // started under another identity or key can slip in before a render.
+  const walletKeyRef = useRef<{
+    identityId: string;
+    keyId: number;
+    contractId: string;
+  } | null>(null);
+  const applyWalletGrant = useCallback(
+    (grant: WalletGrant | null, forIdentityId: string | null) => {
+      walletKeyRef.current =
+        grant && forIdentityId
+          ? {
+              identityId: forIdentityId,
+              keyId: grant.keyId,
+              contractId: grant.contractId,
+            }
+          : null;
+      setWalletGrant(grant);
+    },
+    [],
   );
-  useEffect(() => {
-    walletKeyRef.current =
-      walletGrant && identityId
-        ? { identityId, keyId: walletGrant.keyId }
-        : null;
-  }, [walletGrant, identityId]);
 
   const [activityLog, setActivityLog] = useState<LogEntry[]>([]);
 
@@ -226,9 +236,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           await resolve(connected);
 
         setKeyManager(resolvedKeyManager);
-        setWalletGrant(grant);
-        setWalletNotice(null);
         const resolvedId = resolvedKeyManager.identityId ?? null;
+        applyWalletGrant(grant, resolvedId);
+        setWalletNotice(null);
         setIdentityId(resolvedId ?? null);
         setStatus("authenticated");
         log(`Identity resolved: ${resolvedId ?? "(unknown)"}`, {
@@ -270,21 +280,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           setKeyManager(priorKeyManager);
           setIdentityId(priorIdentityId);
           setDpnsName(priorDpnsName);
-          setWalletGrant(priorWalletGrant);
+          applyWalletGrant(priorWalletGrant, priorIdentityId);
           setWalletNotice(priorWalletNotice);
           setStatus(priorStatus);
         } else if (remembered) {
           setKeyManager(null);
           setIdentityId(remembered.id);
           setDpnsName(remembered.name ?? null);
-          setWalletGrant(null);
+          applyWalletGrant(null, null);
           setWalletNotice(null);
           setStatus("browsing");
         } else {
           setKeyManager(priorKeyManager);
           setIdentityId(priorIdentityId);
           setDpnsName(priorDpnsName);
-          setWalletGrant(priorWalletGrant);
+          applyWalletGrant(priorWalletGrant, priorIdentityId);
           setWalletNotice(priorWalletNotice);
           setStatus(priorStatus);
         }
@@ -302,6 +312,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       walletNotice,
       connect,
       log,
+      applyWalletGrant,
     ],
   );
 
@@ -453,7 +464,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     setKeyManager(null);
-    setWalletGrant(null);
+    applyWalletGrant(null, null);
     setWalletNotice(null);
     setError(null);
     if (rememberedIdentityId) {
@@ -466,7 +477,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setDpnsName(null);
     setStatus(sdk ? "readonly" : "idle");
     log("Logged out.");
-  }, [sdk, rememberedIdentityId, log]);
+  }, [sdk, rememberedIdentityId, log, applyWalletGrant]);
 
   const setContractId = useCallback(
     (id: string | null) => {
@@ -487,12 +498,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         nextId = loadStoredContractId();
       }
       setContractIdState(nextId);
-      // A wallet key can only write to the contract it was issued for.
-      if (
-        walletGrant &&
-        nextId !== previousId &&
-        nextId !== walletGrant.contractId
-      ) {
+      // A wallet key can only write to the contract it was issued for. The
+      // ref, not the closure: a registration started under a mnemonic may
+      // finish after a wallet sign-in and call an older setContractId.
+      const wallet = walletKeyRef.current;
+      if (wallet && nextId !== previousId && nextId !== wallet.contractId) {
         log(
           "Your wallet key is bound to the previous contract. Sign in again to use this one.",
           "error",
@@ -500,7 +510,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         logout();
       }
     },
-    [sdk, contractId, walletGrant, log, logout],
+    [sdk, contractId, log, logout],
   );
 
   const isCurrentWalletKey = useCallback(
@@ -522,7 +532,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         logout();
         return;
       }
-      setWalletGrant(fresh);
+      applyWalletGrant(fresh, origin.identityId);
     } catch (err) {
       if (!isCurrentWalletKey(origin)) return;
       log(`Couldn't refresh the wallet connection: ${errorMessage(err)}`, {
@@ -530,7 +540,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         detail: "readWalletGrant",
       });
     }
-  }, [walletGrant, identityId, sdk, log, logout, isCurrentWalletKey]);
+  }, [
+    walletGrant,
+    identityId,
+    sdk,
+    log,
+    logout,
+    isCurrentWalletKey,
+    applyWalletGrant,
+  ]);
 
   const reportWriteError = useCallback(
     async (err: unknown): Promise<"renew" | "logout" | null> => {

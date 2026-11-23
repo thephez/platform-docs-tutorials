@@ -872,6 +872,35 @@ describe("SessionProvider", () => {
       expect(ref.current.walletGrant?.keyId).toBe(6);
     });
 
+    it("refreshWalletGrant ignores a result that lands before the renewed grant renders", async () => {
+      const ref = await signInWithWallet();
+      const read = pending<null>();
+      mockReadWalletGrant.mockReturnValue(read.promise);
+      let refresh!: Promise<void>;
+      act(() => {
+        refresh = ref.current.refreshWalletGrant();
+      });
+
+      // The renewal and the stale read settle inside one act, so React has
+      // not re-rendered the new grant when the old read comes back.
+      await act(async () => {
+        await ref.current.loginWithWallet(
+          {
+            identityId: "wallet-identity",
+            auth: auth as never,
+            grant: { ...grant, keyId: 6 },
+          },
+          { rememberMe: true },
+        );
+        read.resolve(null);
+        await refresh;
+      });
+
+      expect(mockToastError).not.toHaveBeenCalled();
+      expect(ref.current.status).toBe("authenticated");
+      expect(ref.current.walletGrant?.keyId).toBe(6);
+    });
+
     it("refreshWalletGrant does not apply limits to another identity's key with the same id", async () => {
       const ref = await signInWithWallet();
       const read = pending<typeof grant>();

@@ -673,6 +673,27 @@ describe("awaitWalletAnswer", () => {
     expect(sdk.documents.query).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects an answer whose read straddled the deadline", async () => {
+    const req = newRequest(OWNER);
+    const doc = await answerDoc(req, OWNER, seed("granted key"));
+    const clock = { t: req.expiresAt - 1_000 };
+    const { asSdk } = stubSdk({
+      identities: { [OWNER]: [grantKey(seed("granted key"))] },
+      budgets: { 3: 1n },
+      query: async () => {
+        clock.t = req.expiresAt + 1;
+        return [doc];
+      },
+    });
+
+    await expect(
+      awaitWalletAnswer(asSdk, req, {
+        now: () => clock.t,
+        trigger: clockTrigger(clock),
+      }),
+    ).rejects.toBeInstanceOf(RequestExpiredError);
+  });
+
   it("returns an unhinted answer only on a complete round after the settle window", async () => {
     const req = newRequest();
     const doc = await answerDoc(req, OWNER, seed("granted key"));
@@ -1026,6 +1047,7 @@ describe("classifyWalletWriteError", () => {
         new Error("Document revision 20006 does not match the stored one"),
       ),
     ).toBeNull();
+    expect(classifyWalletWriteError(new Error("code -20006"))).toBeNull();
     expect(classifyWalletWriteError(new Error("timeout"))).toBeNull();
     expect(classifyWalletWriteError(null)).toBeNull();
   });

@@ -326,7 +326,11 @@ export async function awaitWalletAnswer(
           identity,
           now: req.chainTimeAtCreation + (now() - req.createdAt),
         }).catch(() => null);
-        if (signal?.aborted) throw abortError();
+        if (signal?.aborted) {
+          // Not recorded yet, so the finally below would not wipe it.
+          if (verdict?.ok) wipeGrant(verdict.grant);
+          throw abortError();
+        }
         if (verdict && !verdict.ok && NOT_AN_ANSWER.has(verdict.reason)) {
           decided.add(key);
           continue;
@@ -337,7 +341,11 @@ export async function awaitWalletAnswer(
           complete = false;
           continue;
         }
-        if (!verdict.ok && verdict.retryable) continue;
+        if (!verdict.ok && verdict.retryable) {
+          // The node lags the wallet: this round settles nothing.
+          complete = false;
+          continue;
+        }
         decided.add(key);
         const previous = answers.get(candidate.ownerId);
         if (previous && !(previous instanceof Error)) wipeGrant(previous.grant);
@@ -354,7 +362,7 @@ export async function awaitWalletAnswer(
       }
 
       const answer = answers.values().next().value;
-      if (answer && firstAnswerAt === null) firstAnswerAt = now();
+      if (answer && complete && firstAnswerAt === null) firstAnswerAt = now();
       onStatus?.(
         !complete ? "incomplete-read" : answer ? "answered" : "waiting",
       );
@@ -363,6 +371,8 @@ export async function awaitWalletAnswer(
         answer !== undefined &&
         complete &&
         (hint !== undefined || now() - (firstAnswerAt ?? 0) >= settleMs);
+      // The reads above may have straddled the deadline.
+      if (now() >= req.expiresAt) throw new RequestExpiredError();
       if (answer && settled) {
         if (answer instanceof Error) throw answer;
         returned = answer;
@@ -548,7 +558,7 @@ function consensusCodeOf(err: unknown): number | null {
   }
   const message =
     typeof shape.message === "string" ? shape.message : String(err ?? "");
-  const match = /\bcode\b[^0-9]{0,6}(\d{5})\b/i.exec(message);
+  const match = /\bcode\b[^0-9-]{0,6}(\d{5})\b/i.exec(message);
   return match ? Number(match[1]) : null;
 }
 
