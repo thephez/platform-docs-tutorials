@@ -479,6 +479,70 @@ function toWalletGrant(
   };
 }
 
+/** How a wallet key stands on chain right now. */
+type WalletKeyStanding =
+  | { kind: "usable"; grant: WalletGrant; renewNeeded: boolean }
+  | { kind: "refused"; reason: AppConnectRejectReason };
+
+/**
+ * Reads the key fresh with a proved fetch and says whether it can still sign
+ * for `contractId`. `renewNeeded` is set when it is within an hour of expiry
+ * or has no allowance left: reads still work, writes will not.
+ */
+async function checkWalletKey(
+  sdk: DashSdk,
+  identityId: string,
+  keyId: number,
+  contractId: string,
+): Promise<WalletKeyStanding> {
+  const { key, remainingBudget, chainTimeMs } = await readIdentityKey(
+    sdk,
+    identityId,
+    keyId,
+  );
+  if (!key || key.disabledAt !== undefined) {
+    return { kind: "refused", reason: "key-disabled" };
+  }
+  if (
+    key.bounds?.kind !== "singleContract" ||
+    key.bounds.contractId !== contractId
+  ) {
+    return { kind: "refused", reason: "key-unmatched" };
+  }
+  const expiring =
+    key.expiresAt !== undefined &&
+    key.expiresAt - chainTimeMs <= APP_CONNECT_EXPIRY_MARGIN_MS;
+  const spent =
+    key.totalBudget !== undefined &&
+    (remainingBudget === null || remainingBudget <= 0n);
+  return {
+    kind: "usable",
+    grant: toWalletGrant(key, remainingBudget),
+    renewNeeded: expiring || spent,
+  };
+}
+
+async function signInWithWalletKey(
+  sdk: DashSdk,
+  identityId: string,
+  privateKey: Uint8Array,
+  grant: WalletGrant,
+): Promise<WalletLogin> {
+  const { PrivateKey } = await loadSdkModule();
+  const wif = PrivateKey.fromBytes(privateKey, NETWORK).toWIF();
+  const resolved = await loginWithPrivateKey(sdk, wif, identityId);
+  const { identityId: resolvedId, ...auth } = resolved;
+  return { identityId: resolvedId, auth, grant };
+}
+
+export interface LoginWithWalletAnswerOptions {
+  /**
+   * Called with the accepted key before it is wiped, so the app can keep it
+   * for the next reload. Runs after the on-chain checks; its errors propagate.
+   */
+  persist?: (grant: WalletGrant, privateKey: Uint8Array) => Promise<void>;
+}
+
 /**
  * Turns a verified answer into a one-key session via loginWithPrivateKey,
  * exactly as a pasted WIF does, and wipes the grant's private key bytes.
@@ -489,51 +553,80 @@ function toWalletGrant(
 export async function loginWithWalletAnswer(
   sdk: DashSdk,
   answer: WalletAnswer,
+  options: LoginWithWalletAnswerOptions = {},
 ): Promise<WalletLogin> {
   const { grant } = answer;
   try {
     const granted = grant.authKeys[0];
     if (!granted) throw new Error("The wallet's answer carries no key.");
-    const contractId = boundContractId(granted.key.bounds);
-    const { key, remainingBudget, chainTimeMs } = await readIdentityKey(
+    const standing = await checkWalletKey(
       sdk,
       answer.identityId,
       granted.key.id,
+      boundContractId(granted.key.bounds),
     );
-    if (!key || key.disabledAt !== undefined) {
-      throw new WalletAnswerRefusedError("key-disabled");
+    if (standing.kind === "refused") {
+      throw new WalletAnswerRefusedError(standing.reason);
     }
-    if (
-      key.bounds?.kind !== "singleContract" ||
-      key.bounds.contractId !== contractId
-    ) {
-      throw new WalletAnswerRefusedError("key-unmatched");
+    if (standing.renewNeeded) {
+      const reason: AppConnectRejectReason =
+        standing.grant.remainingBudget !== null &&
+        standing.grant.remainingBudget <= 0n
+          ? "budget-exhausted"
+          : standing.grant.totalBudget !== null &&
+              standing.grant.remainingBudget === null
+            ? "budget-unknown"
+            : "key-expired";
+      throw new WalletAnswerRefusedError(reason);
     }
-    if (
-      key.expiresAt !== undefined &&
-      key.expiresAt - chainTimeMs <= APP_CONNECT_EXPIRY_MARGIN_MS
-    ) {
-      throw new WalletAnswerRefusedError("key-expired");
+    if (options.persist) {
+      await options.persist(standing.grant, granted.privateKey);
     }
-    if (key.totalBudget !== undefined) {
-      if (remainingBudget === null) {
-        throw new WalletAnswerRefusedError("budget-unknown");
-      }
-      if (remainingBudget <= 0n) {
-        throw new WalletAnswerRefusedError("budget-exhausted");
-      }
-    }
-
-    const { PrivateKey } = await loadSdkModule();
-    const wif = PrivateKey.fromBytes(granted.privateKey, NETWORK).toWIF();
-    const { identityId, ...auth } = await loginWithPrivateKey(
+    return await signInWithWalletKey(
       sdk,
-      wif,
       answer.identityId,
+      granted.privateKey,
+      standing.grant,
     );
-    return { identityId, auth, grant: toWalletGrant(key, remainingBudget) };
   } finally {
     wipeGrant(grant);
+  }
+}
+
+export interface StoredWalletKey {
+  identityId: string;
+  keyId: number;
+  contractId: string;
+}
+
+/**
+ * Signs in again with a key kept from an earlier wallet grant, after
+ * reading it fresh on chain. Null when the key is gone, disabled or bound
+ * elsewhere (the caller forgets it); `renewNeeded` when it still exists but
+ * can no longer write. Wipes `privateKey` either way.
+ */
+export async function restoreWalletLogin(
+  sdk: DashSdk,
+  stored: StoredWalletKey,
+  privateKey: Uint8Array,
+): Promise<{ login: WalletLogin; renewNeeded: boolean } | null> {
+  try {
+    const standing = await checkWalletKey(
+      sdk,
+      stored.identityId,
+      stored.keyId,
+      stored.contractId,
+    );
+    if (standing.kind === "refused") return null;
+    const login = await signInWithWalletKey(
+      sdk,
+      stored.identityId,
+      privateKey,
+      standing.grant,
+    );
+    return { login, renewNeeded: standing.renewNeeded };
+  } finally {
+    privateKey.fill(0);
   }
 }
 
