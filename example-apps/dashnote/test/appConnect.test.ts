@@ -44,8 +44,18 @@ const fromBytes = vi.fn((bytes: Uint8Array, network: string) => {
   return { toWIF: () => "cWIF" };
 });
 
+class FakeSigner {
+  keys: unknown[] = [];
+  addKey(key: unknown) {
+    this.keys.push(key);
+  }
+}
+
 vi.mock("../src/dash/sdkModule", () => ({
-  loadSdkModule: async () => ({ PrivateKey: { fromBytes } }),
+  loadSdkModule: async () => ({
+    PrivateKey: { fromBytes },
+    IdentitySigner: FakeSigner,
+  }),
 }));
 
 vi.mock("../src/dash/loginWithPrivateKey", () => ({
@@ -142,7 +152,14 @@ function stubSdk(options: StubOptions = {}) {
     },
     identities: {
       fetchWithProof: vi.fn(async (id: string) => ({
-        data: identities[id] ? { publicKeys: identities[id] } : undefined,
+        data: identities[id]
+          ? {
+              id: { toString: () => id },
+              publicKeys: identities[id],
+              getPublicKeyById: (keyId: number) =>
+                identities[id]!.find((k) => k.keyId === keyId),
+            }
+          : undefined,
         metadata: {
           timeMs: options.chainTimeMs ?? BigInt(CHAIN_NOW),
           protocolVersion: 14,
@@ -898,13 +915,12 @@ describe("loginWithWalletAnswer", () => {
 
     expect(fromBytes).toHaveBeenCalledWith(expect.any(Uint8Array), "testnet");
     expect(fromBytes.mock.lastCall![0]).toHaveLength(32);
-    expect(loginWithPrivateKey).toHaveBeenCalledWith(asSdk, "cWIF", OWNER);
+    // No second lookup: the session is built from the proved read itself.
+    expect(loginWithPrivateKey).not.toHaveBeenCalled();
     expect(login.identityId).toBe(OWNER);
-    expect(login.auth).toEqual({
-      identity: { id: OWNER },
-      identityKey: { keyId: 3 },
-      signer: { kind: "signer" },
-    });
+    expect(String(login.auth.identity.id)).toBe(OWNER);
+    expect(login.auth.identityKey).toMatchObject({ keyId: 3 });
+    expect((login.auth.signer as unknown as FakeSigner).keys).toHaveLength(1);
     expect(sdk.identities.fetchWithProof).toHaveBeenCalledWith(OWNER);
     expect(sdk.identities.keysRemainingBudgets).toHaveBeenCalledWith(
       OWNER,
@@ -988,7 +1004,9 @@ describe("loginWithWalletAnswer", () => {
   });
 
   it("wipes the key when the login fails", async () => {
-    vi.mocked(loginWithPrivateKey).mockRejectedValueOnce(new Error("nope"));
+    fromBytes.mockImplementationOnce(() => {
+      throw new Error("nope");
+    });
     const privateKey = seed("granted key").slice();
     const { asSdk } = stubSdk({
       identities: { [OWNER]: [grantKey(seed("granted key"))] },
@@ -1092,9 +1110,9 @@ describe("loginWithWalletAnswer persist hook", () => {
       },
       budgets: { 3: 55n },
     });
-    vi.mocked(loginWithPrivateKey).mockRejectedValueOnce(
-      new Error("identity read failed"),
-    );
+    fromBytes.mockImplementationOnce(() => {
+      throw new Error("identity read failed");
+    });
 
     await expect(
       loginWithWalletAnswer(
@@ -1128,7 +1146,8 @@ describe("restoreWalletLogin", () => {
     expect(result?.renewNeeded).toBe(false);
     expect(result?.login.identityId).toBe(OWNER);
     expect(result?.login.grant.remainingBudget).toBe(55n);
-    expect(loginWithPrivateKey).toHaveBeenCalledWith(asSdk, "cWIF", OWNER);
+    expect(loginWithPrivateKey).not.toHaveBeenCalled();
+    expect(String(result?.login.auth.identity.id)).toBe(OWNER);
     expect(privateKey.every((b) => b === 0)).toBe(true);
   });
 
@@ -1177,6 +1196,7 @@ describe("restoreWalletLogin", () => {
       ],
     },
   ])("forgets $name", async (c) => {
+    fromBytes.mockClear();
     const privateKey = seed("granted key").slice();
     const { asSdk } = stubSdk({
       identities: { [OWNER]: c.keys },
@@ -1184,7 +1204,7 @@ describe("restoreWalletLogin", () => {
     });
 
     expect(await restoreWalletLogin(asSdk, stored, privateKey)).toBeNull();
-    expect(loginWithPrivateKey).not.toHaveBeenCalledWith(asSdk, "cWIF", OWNER);
+    expect(fromBytes).not.toHaveBeenCalled();
     expect(privateKey.every((b) => b === 0)).toBe(true);
   });
 });

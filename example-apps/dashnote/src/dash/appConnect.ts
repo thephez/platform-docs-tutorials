@@ -12,14 +12,15 @@
  * turns a verified grant into the same one-key session a pasted WIF gives.
  *
  * This file is only ever loaded through a dynamic import (see the load-anchor
- * rules in CLAUDE.md): it pulls in loginWithPrivateKey, which has top-level
- * @dashevo/evo-sdk value imports.
+ * rules in CLAUDE.md), so the session and the sign-in panel reach it lazily;
+ * SDK classes come through loadSdkModule.
  */
 import * as secp256k1 from "@noble/secp256k1";
 import {
   APP_CONNECT_EXPIRY_MARGIN_MS,
   APP_CONNECT_MAX_CANDIDATES,
   APP_CONNECT_MAX_REQUEST_AGE_MS,
+  KeyPurpose,
   KeySecurityLevel,
   appConnectCandidateKey,
   appConnectPollDelayMs,
@@ -40,9 +41,10 @@ import type {
   AppConnectRejectReason,
 } from "../vendor/platform-auth/app-connect";
 import { decodeBase58 } from "../vendor/platform-auth/app-connect/primitives";
-import { loginWithPrivateKey } from "./loginWithPrivateKey";
 import { loadSdkModule } from "./sdkModule";
 import type { DashAuth, DashSdk } from "./types";
+
+type SdkIdentity = DashAuth["identity"];
 
 /** The App Connect system contract: where wallets publish `loginKeyResponse`. */
 export const APP_CONNECT_CONTRACT_ID =
@@ -442,6 +444,8 @@ interface KeyReading {
   remainingBudget: bigint | null;
   /** Latest block time, ms. */
   chainTimeMs: number;
+  /** The proved identity itself, so a sign-in needs no second lookup. */
+  identity: SdkIdentity | null;
 }
 
 async function readIdentityKey(
@@ -454,7 +458,8 @@ async function readIdentityKey(
   const raw = (data?.publicKeys as unknown as SdkKey[] | undefined)?.find(
     (k) => k.keyId === keyId,
   );
-  if (!raw) return { key: null, remainingBudget: null, chainTimeMs };
+  const identity = (data as SdkIdentity | undefined) ?? null;
+  if (!raw) return { key: null, remainingBudget: null, chainTimeMs, identity };
   const key = toIdentityKey(raw);
   let remainingBudget: bigint | null = null;
   if (key.disabledAt === undefined && key.totalBudget !== undefined) {
@@ -463,7 +468,7 @@ async function readIdentityKey(
     ]);
     remainingBudget = budgets.get(keyId) ?? null;
   }
-  return { key, remainingBudget, chainTimeMs };
+  return { key, remainingBudget, chainTimeMs, identity };
 }
 
 function toWalletGrant(
@@ -481,7 +486,12 @@ function toWalletGrant(
 
 /** How a wallet key stands on chain right now. */
 type WalletKeyStanding =
-  | { kind: "usable"; grant: WalletGrant; renewNeeded: boolean }
+  | {
+      kind: "usable";
+      grant: WalletGrant;
+      renewNeeded: boolean;
+      identity: SdkIdentity;
+    }
   | { kind: "refused"; reason: AppConnectRejectReason };
 
 /**
@@ -495,13 +505,19 @@ async function checkWalletKey(
   keyId: number,
   contractId: string,
 ): Promise<WalletKeyStanding> {
-  const { key, remainingBudget, chainTimeMs } = await readIdentityKey(
+  const { key, remainingBudget, chainTimeMs, identity } = await readIdentityKey(
     sdk,
     identityId,
     keyId,
   );
-  if (!key || key.disabledAt !== undefined) {
+  if (!identity || !key || key.disabledAt !== undefined) {
     return { kind: "refused", reason: "key-disabled" };
+  }
+  if (key.purpose !== KeyPurpose.AUTHENTICATION) {
+    return { kind: "refused", reason: "key-purpose" };
+  }
+  if (key.securityLevel !== KeySecurityLevel.HIGH) {
+    return { kind: "refused", reason: "key-level" };
   }
   if (
     key.bounds?.kind !== "singleContract" ||
@@ -519,20 +535,29 @@ async function checkWalletKey(
     kind: "usable",
     grant: toWalletGrant(key, remainingBudget),
     renewNeeded: expiring || spent,
+    identity,
   };
 }
 
+// The proved read already holds the identity and the key, so the session
+// is built from them directly: no second lookup, as a pasted WIF would need.
 async function signInWithWalletKey(
-  sdk: DashSdk,
-  identityId: string,
+  identity: SdkIdentity,
   privateKey: Uint8Array,
   grant: WalletGrant,
 ): Promise<WalletLogin> {
-  const { PrivateKey } = await loadSdkModule();
-  const wif = PrivateKey.fromBytes(privateKey, NETWORK).toWIF();
-  const resolved = await loginWithPrivateKey(sdk, wif, identityId);
-  const { identityId: resolvedId, ...auth } = resolved;
-  return { identityId: resolvedId, auth, grant };
+  const { PrivateKey, IdentitySigner } = await loadSdkModule();
+  const signer = new IdentitySigner();
+  signer.addKey(PrivateKey.fromBytes(privateKey, NETWORK));
+  return {
+    identityId: String(identity.id),
+    auth: {
+      identity,
+      identityKey: identity.getPublicKeyById(grant.keyId),
+      signer,
+    },
+    grant,
+  };
 }
 
 export interface LoginWithWalletAnswerOptions {
@@ -545,8 +570,8 @@ export interface LoginWithWalletAnswerOptions {
 }
 
 /**
- * Turns a verified answer into a one-key session via loginWithPrivateKey,
- * exactly as a pasted WIF does, and wipes the grant's private key bytes.
+ * Turns a verified answer into the same one-key session a pasted WIF gives,
+ * and wipes the grant's private key bytes.
  * The "Is this you?" step can stay open for any time, so the key is read
  * again first and refused if it has since been disabled, run out or come
  * within an hour of expiring.
@@ -581,8 +606,7 @@ export async function loginWithWalletAnswer(
       throw new WalletAnswerRefusedError(reason);
     }
     const login = await signInWithWalletKey(
-      sdk,
-      answer.identityId,
+      standing.identity,
       granted.privateKey,
       standing.grant,
     );
@@ -622,8 +646,7 @@ export async function restoreWalletLogin(
     );
     if (standing.kind === "refused") return null;
     const login = await signInWithWalletKey(
-      sdk,
-      stored.identityId,
+      standing.identity,
       privateKey,
       standing.grant,
     );
