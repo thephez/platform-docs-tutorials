@@ -315,6 +315,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         saveRememberedIdentity({ id: resolvedId, name: resolvedName });
         setRememberedIdentityId(resolvedId);
       } else {
+        const rememberedNow = loadRememberedIdentity()?.id ?? null;
+        if (rememberedNow !== null && rememberedNow !== rememberedBefore) {
+          // Another tab remembered someone during the lookup; theirs stands.
+          setRememberedIdentityId(rememberedNow);
+          return;
+        }
         clearRememberedIdentity();
         setRememberedIdentityId(null);
       }
@@ -694,6 +700,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         stored = null;
       }
       const remembered = loadRememberedIdentity();
+      // Nothing remembered yet: another tab may still be finishing the
+      // sign-in that saved this record, so it is left alone and not used.
+      if (stored && !remembered) stored = null;
       if (
         stored &&
         (stored.identityId !== remembered?.id ||

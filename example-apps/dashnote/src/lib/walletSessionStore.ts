@@ -178,20 +178,22 @@ function readMarker(): string | null {
   }
 }
 
-function writeMarker(tag: string | null): void {
+function writeMarker(tag: string | null): boolean {
   try {
     if (tag === null) localStorage.removeItem(ACTIVE_KEY);
     else localStorage.setItem(ACTIVE_KEY, tag);
+    return true;
   } catch {
-    // without localStorage nothing is ever accepted; see storage availability
+    // quota or no localStorage: nothing a reader would accept gets written
+    return false;
   }
 }
 
 // Deletes the record only while it is still the given grant.
-async function deleteSessionIf(grant: {
-  identityId: string;
-  keyId: number;
-}): Promise<void> {
+async function deleteSessionIf(
+  grant: { identityId: string; keyId: number },
+  iv?: Uint8Array,
+): Promise<void> {
   try {
     await withStore<unknown>("readwrite", (store) => {
       const get = store.get(SESSION);
@@ -200,7 +202,8 @@ async function deleteSessionIf(grant: {
         if (
           isSessionRecord(current) &&
           current.identityId === grant.identityId &&
-          current.keyId === grant.keyId
+          current.keyId === grant.keyId &&
+          (iv === undefined || sameBytes(current.iv, iv))
         ) {
           store.delete(SESSION);
         }
@@ -248,7 +251,7 @@ async function readSession(): Promise<unknown> {
   }
   if (isSessionRecord(record) && readMarker() !== grantTag(record)) {
     // Cleared, or superseded by a save whose record is still on its way.
-    await deleteSessionIf(record);
+    await deleteSessionIf(record, record.iv);
     return undefined;
   }
   return record;
@@ -298,8 +301,7 @@ export async function saveWalletSession(
   const record: SessionRecord = { ...pickSession(session), iv, ciphertext };
   // The marker goes first: a reader never sees the new record as stale, and
   // a crash before the write leaves nothing a reader would accept.
-  if (!hasLocalStorage()) throw unavailable();
-  writeMarker(grantTag(session));
+  if (!writeMarker(grantTag(session))) throw unavailable();
   await withStore("readwrite", (store) => store.put(record, SESSION));
 }
 

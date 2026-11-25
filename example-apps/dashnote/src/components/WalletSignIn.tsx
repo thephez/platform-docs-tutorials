@@ -100,6 +100,17 @@ export function WalletSignIn({
   // session object changes identity.
   const sessionRef = useRef(session);
   const propsRef = useRef({ keepKey, onSignedIn });
+  // A renewal signs in without the confirm step, so its answer must wait
+  // for the box's default to settle; resolved once the store has answered.
+  const [keptKnownGate] = useState(() => {
+    let resolve: (() => void) | null = null;
+    const promise = renew
+      ? new Promise<void>((done) => {
+          resolve = done;
+        })
+      : Promise.resolve();
+    return { promise, resolve: () => resolve?.() };
+  });
   useEffect(() => {
     sessionRef.current = session;
     propsRef.current = { keepKey, onSignedIn };
@@ -120,12 +131,13 @@ export function WalletSignIn({
           if (!alive) return;
           setStaySignedIn(stored !== null && stored.identityId === current);
           setKeptKnown(true);
+          keptKnownGate.resolve();
         });
     }
     return () => {
       alive = false;
     };
-  }, [renew]);
+  }, [renew, keptKnownGate]);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -181,7 +193,7 @@ export function WalletSignIn({
                 keyId: grant.keyId,
               }).catch(() => {});
               sessionRef.current.log(
-                "Couldn't keep the key on this device; you'll sign in again after a reload.",
+                "Couldn't keep the key on this device; you may have to sign in again after a reload.",
               );
             }
           }
@@ -271,6 +283,11 @@ export function WalletSignIn({
           return;
         }
         if (identityHint) {
+          await keptKnownGate.promise;
+          if (signal.aborted) {
+            mod.disposeWalletAnswer(answer);
+            return;
+          }
           void signIn({ answer, mod });
           return;
         }
@@ -307,7 +324,15 @@ export function WalletSignIn({
       window.removeEventListener("focus", wake);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [sdk, contractId, identityHint, attempt, signIn, releasePending]);
+  }, [
+    sdk,
+    contractId,
+    identityHint,
+    attempt,
+    signIn,
+    releasePending,
+    keptKnownGate,
+  ]);
 
   const confirming = phase.kind === "confirm";
   useEffect(() => {

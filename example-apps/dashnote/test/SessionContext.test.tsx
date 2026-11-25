@@ -259,6 +259,31 @@ describe("SessionProvider", () => {
     expect(ref.current.identityId).toBe("this-identity");
   });
 
+  it("leaves an identity another tab remembered even when this sign-in does not remember", async () => {
+    let name!: (value: string | null) => void;
+    mockResolveDpnsName.mockReturnValue(
+      new Promise((resolve) => {
+        name = resolve;
+      }),
+    );
+    mockKeyManagerCreate.mockResolvedValue({ identityId: "this-identity" });
+    const ref = mountSession();
+    let pending!: Promise<void>;
+    act(() => {
+      pending = ref.current.login("test mnemonic", { rememberMe: false });
+    });
+    await waitFor(() => expect(mockResolveDpnsName).toHaveBeenCalled());
+    const other = JSON.stringify({ id: "other-identity", name: "bob" });
+    localStorage.setItem(REMEMBERED_KEY, other);
+    await act(async () => {
+      name("alice");
+      await pending;
+    });
+    expect(localStorage.getItem(REMEMBERED_KEY)).toBe(other);
+    expect(ref.current.status).toBe("authenticated");
+    expect(ref.current.identityId).toBe("this-identity");
+  });
+
   it("still remembers a sign-in after another tab forgot during the name lookup", async () => {
     localStorage.setItem(
       REMEMBERED_KEY,
@@ -1306,14 +1331,13 @@ describe("SessionProvider", () => {
       expect(ref.current.identityId).toBe("someone-else");
     });
 
-    it("drops a kept session when no identity is remembered", async () => {
+    it("leaves a kept session alone when no identity is remembered yet", async () => {
+      // Another tab may still be finishing the sign-in that saved it.
       localStorage.removeItem(REMEMBERED_KEY);
       const ref = mountSession();
       expect(ref.current.restoringWallet).toBe(false);
-      await waitFor(() =>
-        expect(store.clearWalletSession).toHaveBeenCalledTimes(1),
-      );
-      expect(store.clearWalletSession).toHaveBeenCalledWith(KEPT);
+      await waitFor(() => expect(store.peekWalletSession).toHaveBeenCalled());
+      expect(store.clearWalletSession).not.toHaveBeenCalled();
       expect(store.loadWalletSession).not.toHaveBeenCalled();
       expect(ref.current.status).toBe("idle");
     });

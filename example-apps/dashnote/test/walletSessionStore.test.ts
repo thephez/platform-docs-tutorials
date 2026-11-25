@@ -348,4 +348,32 @@ describe("the active marker and conditional clear", () => {
       "Wallet session storage is unavailable",
     );
   });
+
+  it("fails a save whose marker cannot be written", async () => {
+    vi.stubGlobal("localStorage", {
+      ...fakeLocalStorage,
+      setItem: (k: string, v: string) => {
+        if (k === "dashnote.walletSession.active") throw new Error("quota");
+        storage.set(k, v);
+      },
+    });
+    await expect(saveWalletSession(SESSION, keyBytes(1))).rejects.toThrow(
+      "Wallet session storage is unavailable",
+    );
+    expect(await readRaw("session")).toBeUndefined();
+  });
+
+  it("does not delete a fresh copy of the same grant while discarding a stale one", async () => {
+    await saveWalletSession(SESSION, keyBytes(1));
+    const stale = (await readRaw("session")) as { iv: Uint8Array };
+    // A reader found the marker gone, then another tab re-saved the grant.
+    storage.delete("dashnote.walletSession.active");
+    const peek = peekWalletSession();
+    await saveWalletSession(SESSION, keyBytes(2));
+    await peek;
+    const fresh = (await readRaw("session")) as { iv: Uint8Array } | undefined;
+    expect(fresh).toBeDefined();
+    expect(fresh!.iv).not.toEqual(stale.iv);
+    expect((await loadWalletSession())?.privateKey).toEqual(keyBytes(2));
+  });
 });

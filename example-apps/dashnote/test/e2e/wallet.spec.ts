@@ -212,7 +212,7 @@ test("a kept session survives a reload without a new wallet approval", async ({
     page.getByRole("heading", { name: "Wallet connection" }),
   ).toBeVisible();
   await expect(grantValue(page, "On this device")).toHaveText(
-    "Kept until it expires",
+    "Kept on this device",
   );
   await expect(grantValue(page, "Key id")).toHaveText(String(keyId));
 

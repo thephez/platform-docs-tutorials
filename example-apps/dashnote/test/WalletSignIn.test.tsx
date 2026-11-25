@@ -718,7 +718,7 @@ describe("WalletSignIn", () => {
 
       await waitFor(() => expect(onSignedIn).toHaveBeenCalledTimes(1));
       expect(log).toHaveBeenCalledWith(
-        "Couldn't keep the key on this device; you'll sign in again after a reload.",
+        "Couldn't keep the key on this device; you may have to sign in again after a reload.",
       );
       // Only the key it tried to keep; another tab's session stays.
       expect(mocks.clearWalletSession).toHaveBeenCalledTimes(1);
