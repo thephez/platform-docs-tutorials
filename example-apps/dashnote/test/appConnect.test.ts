@@ -1078,8 +1078,33 @@ describe("loginWithWalletAnswer persist hook", () => {
         },
       ),
     ).rejects.toThrow("storage blocked");
-    expect(loginWithPrivateKey).not.toHaveBeenCalledWith(asSdk, "cWIF", OWNER);
     expect(failing.every((b) => b === 0)).toBe(true);
+  });
+
+  it("does not persist a key whose sign-in failed", async () => {
+    const privateKey = seed("granted key").slice();
+    const persist = vi.fn(async () => {});
+    const { asSdk } = stubSdk({
+      identities: {
+        [OWNER]: [
+          grantKey(seed("granted key"), { expiresAt: BigInt(FRESH_EXPIRES) }),
+        ],
+      },
+      budgets: { 3: 55n },
+    });
+    vi.mocked(loginWithPrivateKey).mockRejectedValueOnce(
+      new Error("identity read failed"),
+    );
+
+    await expect(
+      loginWithWalletAnswer(
+        asSdk,
+        { identityId: OWNER, grant: testGrant(privateKey) },
+        { persist },
+      ),
+    ).rejects.toThrow("identity read failed");
+    expect(persist).not.toHaveBeenCalled();
+    expect(privateKey.every((b) => b === 0)).toBe(true);
   });
 });
 

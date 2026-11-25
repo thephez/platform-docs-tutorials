@@ -147,6 +147,28 @@ function isSessionRecord(value: unknown): value is SessionRecord {
   );
 }
 
+// A synchronous marker beside the record. Clearing removes it before the
+// IndexedDB delete starts, so a delete that fails or is still in flight when
+// the tab closes cannot leave a key that signs the next load back in.
+const ACTIVE_KEY = "dashnote.walletSession.active";
+
+function markActive(active: boolean): void {
+  try {
+    if (active) localStorage.setItem(ACTIVE_KEY, "1");
+    else localStorage.removeItem(ACTIVE_KEY);
+  } catch {
+    // no localStorage: the record alone decides
+  }
+}
+
+function isMarkedActive(): boolean {
+  try {
+    return localStorage.getItem(ACTIVE_KEY) === "1";
+  } catch {
+    return true;
+  }
+}
+
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   return a.length === b.length && a.every((byte, i) => byte === b[i]);
 }
@@ -159,13 +181,10 @@ async function discardSession(failedIv: Uint8Array | null): Promise<void> {
       const get = store.get(SESSION);
       get.onsuccess = () => {
         const current = get.result as unknown;
-        if (
-          failedIv === null ||
+        const stale =
           !isSessionRecord(current) ||
-          sameBytes(current.iv, failedIv)
-        ) {
-          store.delete(SESSION);
-        }
+          (failedIv !== null && sameBytes(current.iv, failedIv));
+        if (stale) store.delete(SESSION);
       };
       return get;
     });
@@ -176,11 +195,24 @@ async function discardSession(failedIv: Uint8Array | null): Promise<void> {
 
 async function readSession(): Promise<unknown> {
   if (!hasIndexedDb()) return undefined;
+  let record: unknown;
   try {
-    return await withStore<unknown>("readonly", (store) => store.get(SESSION));
+    record = await withStore<unknown>("readonly", (store) =>
+      store.get(SESSION),
+    );
   } catch {
     return undefined;
   }
+  if (record !== undefined && !isMarkedActive()) {
+    // A clear removed the marker but its delete did not land.
+    try {
+      await withStore("readwrite", (store) => store.delete(SESSION));
+    } catch {
+      // storage is gone; nothing to keep anyway
+    }
+    return undefined;
+  }
+  return record;
 }
 
 /** Whether this browser can keep a key here (IndexedDB and Web Crypto usable). */
@@ -225,6 +257,8 @@ export async function saveWalletSession(
   }
 
   const record: SessionRecord = { ...pickSession(session), iv, ciphertext };
+  // Marked before the write, so a reader never sees a fresh record as stale.
+  markActive(true);
   await withStore("readwrite", (store) => store.put(record, SESSION));
 }
 
@@ -271,10 +305,41 @@ export async function loadWalletSession(): Promise<{
   }
 }
 
-export async function clearWalletSession(): Promise<void> {
-  if (!hasIndexedDb()) return;
+/**
+ * Forgets the kept session. With `match`, only a record for exactly that
+ * identity and key is removed, so a slow caller cannot erase a session
+ * another tab saved since; without it the session goes unconditionally and
+ * the marker is dropped first.
+ */
+export async function clearWalletSession(match?: {
+  identityId: string;
+  keyId: number;
+}): Promise<void> {
+  if (!hasIndexedDb()) {
+    if (!match) markActive(false);
+    return;
+  }
   try {
-    await withStore("readwrite", (store) => store.delete(SESSION));
+    if (!match) {
+      markActive(false);
+      await withStore("readwrite", (store) => store.delete(SESSION));
+      return;
+    }
+    await withStore<unknown>("readwrite", (store) => {
+      const get = store.get(SESSION);
+      get.onsuccess = () => {
+        const current = get.result as unknown;
+        if (
+          isSessionRecord(current) &&
+          current.identityId === match.identityId &&
+          current.keyId === match.keyId
+        ) {
+          markActive(false);
+          store.delete(SESSION);
+        }
+      };
+      return get;
+    });
   } catch {
     // nothing stored, or storage is gone
   }

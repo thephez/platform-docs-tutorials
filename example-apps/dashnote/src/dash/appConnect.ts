@@ -538,7 +538,8 @@ async function signInWithWalletKey(
 export interface LoginWithWalletAnswerOptions {
   /**
    * Called with the accepted key before it is wiped, so the app can keep it
-   * for the next reload. Runs after the on-chain checks; its errors propagate.
+   * for the next reload. Runs after the key has signed in; its errors
+   * propagate.
    */
   persist?: (grant: WalletGrant, privateKey: Uint8Array) => Promise<void>;
 }
@@ -579,15 +580,17 @@ export async function loginWithWalletAnswer(
             : "key-expired";
       throw new WalletAnswerRefusedError(reason);
     }
-    if (options.persist) {
-      await options.persist(standing.grant, granted.privateKey);
-    }
-    return await signInWithWalletKey(
+    const login = await signInWithWalletKey(
       sdk,
       answer.identityId,
       granted.privateKey,
       standing.grant,
     );
+    // Only a key that just signed in is worth keeping.
+    if (options.persist) {
+      await options.persist(standing.grant, granted.privateKey);
+    }
+    return login;
   } finally {
     wipeGrant(grant);
   }

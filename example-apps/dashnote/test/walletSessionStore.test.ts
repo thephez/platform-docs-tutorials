@@ -243,3 +243,59 @@ describe("walletSessionStore", () => {
     );
   });
 });
+
+describe("the active marker and conditional clear", () => {
+  const storage = new Map<string, string>();
+  const fakeLocalStorage = {
+    getItem: (k: string) => storage.get(k) ?? null,
+    setItem: (k: string, v: string) => void storage.set(k, v),
+    removeItem: (k: string) => void storage.delete(k),
+  };
+
+  beforeEach(() => {
+    storage.clear();
+    vi.stubGlobal("indexedDB", new IDBFactory());
+    vi.stubGlobal("localStorage", fakeLocalStorage);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("ignores and removes a record whose clear did not land", async () => {
+    await saveWalletSession(SESSION, keyBytes(1));
+    // A clear drops the marker first; pretend its IndexedDB delete failed.
+    storage.delete("dashnote.walletSession.active");
+
+    expect(await peekWalletSession()).toBeNull();
+    expect(await readRaw("session")).toBeUndefined();
+
+    await saveWalletSession(SESSION, keyBytes(1));
+    storage.delete("dashnote.walletSession.active");
+    expect(await loadWalletSession()).toBeNull();
+    expect(await readRaw("session")).toBeUndefined();
+  });
+
+  it("marks a saved session active and a cleared one inactive before deleting", async () => {
+    await saveWalletSession(SESSION, keyBytes(1));
+    expect(storage.get("dashnote.walletSession.active")).toBe("1");
+    await clearWalletSession();
+    expect(storage.has("dashnote.walletSession.active")).toBe(false);
+    expect(await readRaw("session")).toBeUndefined();
+  });
+
+  it("clears only a matching record when asked for a specific grant", async () => {
+    await saveWalletSession(SESSION, keyBytes(1));
+
+    await clearWalletSession({ identityId: SESSION.identityId, keyId: 999 });
+    expect(await peekWalletSession()).not.toBeNull();
+    expect(storage.get("dashnote.walletSession.active")).toBe("1");
+
+    await clearWalletSession({
+      identityId: SESSION.identityId,
+      keyId: SESSION.keyId,
+    });
+    expect(await peekWalletSession()).toBeNull();
+    expect(storage.has("dashnote.walletSession.active")).toBe(false);
+  });
+});
