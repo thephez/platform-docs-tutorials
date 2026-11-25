@@ -56,6 +56,7 @@ interface SessionOverrides {
   walletSessionKept?: boolean;
   refreshWalletGrant?: ReturnType<typeof vi.fn>;
   dismissWalletNotice?: ReturnType<typeof vi.fn>;
+  restoringWallet?: boolean;
 }
 
 function makeSession(overrides: SessionOverrides = {}) {
@@ -80,6 +81,7 @@ function makeSession(overrides: SessionOverrides = {}) {
     walletSessionKept: false,
     refreshWalletGrant: vi.fn().mockResolvedValue(undefined),
     dismissWalletNotice: vi.fn(),
+    restoringWallet: false,
     ...overrides,
   };
 }
@@ -132,6 +134,21 @@ describe("SettingsPanel", () => {
     expect(screen.queryByTestId("settings-identity-block")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }));
     expect(onOpenLogin).toHaveBeenCalled();
+  });
+
+  it("says it is signing in, with no prompt, while a kept wallet session restores", () => {
+    mockUseSession.mockReturnValue(
+      makeSession({
+        status: "connecting",
+        keyManager: null,
+        restoringWallet: true,
+      }),
+    );
+    render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
+    expect(screen.getByText("Signing in with your wallet key…")).toBeTruthy();
+    expect(screen.queryByText(/sign in to view/i)).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByTestId("settings-identity-block")).toBeNull();
   });
 
   it("hides the danger zone when nothing is remembered", () => {

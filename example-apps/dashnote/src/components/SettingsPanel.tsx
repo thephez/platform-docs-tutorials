@@ -127,6 +127,14 @@ export function SettingsPanel({
   const isConnected =
     session.status === "authenticated" || session.status === "browsing";
 
+  if (!isConnected && session.restoringWallet) {
+    return (
+      <div className="rounded-md border border-line bg-bg/40 p-6 text-center text-[13px] text-ink-3">
+        <p aria-live="polite">Signing in with your wallet key…</p>
+      </div>
+    );
+  }
+
   if (!isConnected) {
     return (
       <div className="flex flex-col items-center gap-4 rounded-md border border-line bg-bg/40 p-6 text-center text-[13px] text-ink-3">

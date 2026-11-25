@@ -9,6 +9,7 @@ interface IdentityCardProps {
   identityId: string | null;
   dpnsName: string | null;
   contractId: string | null;
+  restoringWallet?: boolean;
   onLoginClick: () => void;
   onOpenSettings: () => void;
 }
@@ -24,11 +25,53 @@ function avatarGradient(seed: string | null): string {
   return `conic-gradient(from ${hash}deg, oklch(65% 0.15 ${hash}), oklch(50% 0.12 ${(hash + 120) % 360}), oklch(65% 0.15 ${hash}))`;
 }
 
+function IdentitySummary({
+  identityId,
+  dpnsName,
+  contractId,
+  interactive = false,
+}: {
+  identityId: string | null;
+  dpnsName: string | null;
+  contractId: string | null;
+  interactive?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <div
+        className="h-7 w-7 shrink-0 rounded-full"
+        style={{ background: avatarGradient(identityId) }}
+      />
+      <div className="min-w-0">
+        <div
+          className={`truncate text-[12px] font-semibold text-ink ${
+            interactive ? "transition-colors group-hover:text-accent" : ""
+          }`}
+        >
+          {dpnsName
+            ? `@${dpnsName}`
+            : identityId
+              ? truncateId(identityId, 6)
+              : "Identity"}
+        </div>
+        <div className="truncate font-mono text-[10px] text-ink-4">
+          {dpnsName && identityId
+            ? truncateId(identityId, 6)
+            : contractId
+              ? `contract ${truncateId(contractId, 6)}`
+              : "No contract"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function IdentityCard({
   status,
   identityId,
   dpnsName,
   contractId,
+  restoringWallet = false,
   onLoginClick,
   onOpenSettings,
 }: IdentityCardProps) {
@@ -59,6 +102,34 @@ export function IdentityCard({
       document.removeEventListener("keydown", onKey);
     };
   }, [menuOpen]);
+
+  // A kept wallet session is being restored: show who is signing in, with
+  // nothing to click until it settles.
+  if (!isConnected && restoringWallet) {
+    return (
+      <div className="border-t border-line pt-3.5">
+        <div className="mb-0.5">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-4">
+            Signing in
+          </span>
+        </div>
+        <IdentitySummary
+          identityId={identityId}
+          dpnsName={dpnsName}
+          contractId={contractId}
+        />
+        <div className="mt-2.5">
+          <span
+            data-testid="identity-restoring"
+            aria-live="polite"
+            className="font-mono text-[10.5px] text-ink-3"
+          >
+            Signing in with your wallet key…
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   if (!isConnected) {
     return (
@@ -103,28 +174,12 @@ export function IdentityCard({
           </span>
         </div>
         {isBrowsing && (
-          <div className="flex items-center gap-2.5">
-            <div
-              className="h-7 w-7 shrink-0 rounded-full"
-              style={{ background: avatarGradient(identityId) }}
-            />
-            <div className="min-w-0">
-              <div className="truncate text-[12px] font-semibold text-ink transition-colors group-hover:text-accent">
-                {dpnsName
-                  ? `@${dpnsName}`
-                  : identityId
-                    ? truncateId(identityId, 6)
-                    : "Identity"}
-              </div>
-              <div className="truncate font-mono text-[10px] text-ink-4">
-                {dpnsName && identityId
-                  ? truncateId(identityId, 6)
-                  : contractId
-                    ? `contract ${truncateId(contractId, 6)}`
-                    : "No contract"}
-              </div>
-            </div>
-          </div>
+          <IdentitySummary
+            identityId={identityId}
+            dpnsName={dpnsName}
+            contractId={contractId}
+            interactive
+          />
         )}
         <div className="mt-2.5">
           <span className="font-mono text-[10.5px] text-ink-3">
@@ -152,28 +207,12 @@ export function IdentityCard({
             Menu
           </span>
         </div>
-        <div className="flex items-center gap-2.5">
-          <div
-            className="h-7 w-7 shrink-0 rounded-full"
-            style={{ background: avatarGradient(identityId) }}
-          />
-          <div className="min-w-0">
-            <div className="truncate text-[12px] font-semibold text-ink transition-colors group-hover:text-accent">
-              {dpnsName
-                ? `@${dpnsName}`
-                : identityId
-                  ? truncateId(identityId, 6)
-                  : "Identity"}
-            </div>
-            <div className="truncate font-mono text-[10px] text-ink-4">
-              {dpnsName && identityId
-                ? truncateId(identityId, 6)
-                : contractId
-                  ? `contract ${truncateId(contractId, 6)}`
-                  : "No contract"}
-            </div>
-          </div>
-        </div>
+        <IdentitySummary
+          identityId={identityId}
+          dpnsName={dpnsName}
+          contractId={contractId}
+          interactive
+        />
 
         <div className="mt-2.5">
           <span className="font-mono text-[10.5px] text-ink-3">

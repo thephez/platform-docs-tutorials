@@ -39,10 +39,20 @@ function App() {
   const [loginOpen, setLoginOpen] = useState(false);
   const [loginView, setLoginView] = useState<LoginView>("form");
   const [loginRenew, setLoginRenew] = useState(false);
+  const [loginOpenedDuringRestore, setLoginOpenedDuringRestore] =
+    useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const isDesktop = useMediaQuery("(min-width: 768px)");
 
   const mobileFullBleed = tab === "notes";
+
+  // A modal opened while a kept session was still restoring was asking for a
+  // sign-in the restore has now done, so it steps aside. Once the restore
+  // settles the modal is the user's own again.
+  if (loginOpenedDuringRestore && !restoringWallet) {
+    setLoginOpenedDuringRestore(false);
+    if (status === "authenticated") setLoginOpen(false);
+  }
 
   useEffect(() => {
     if (restoringWallet) return;
@@ -64,13 +74,20 @@ function App() {
   const openLogin = () => {
     setLoginView("form");
     setLoginRenew(false);
+    setLoginOpenedDuringRestore(restoringWallet);
     setLoginOpen(true);
   };
 
   const openRenew = () => {
     setLoginView("wallet");
     setLoginRenew(true);
+    setLoginOpenedDuringRestore(restoringWallet);
     setLoginOpen(true);
+  };
+
+  const closeLogin = () => {
+    setLoginOpenedDuringRestore(false);
+    setLoginOpen(false);
   };
 
   const header = useMemo(() => screenCopy[tab], [tab]);
@@ -85,6 +102,7 @@ function App() {
         identityId={session.identityId}
         dpnsName={session.dpnsName}
         contractId={session.contractId}
+        restoringWallet={restoringWallet}
         onLoginOpen={openLogin}
         onOpenActivity={() => setActivityOpen(true)}
         mobileFullBleed={mobileFullBleed}
@@ -138,7 +156,7 @@ function App() {
 
       <LoginModal
         open={loginOpen}
-        onClose={() => setLoginOpen(false)}
+        onClose={closeLogin}
         initialView={loginView}
         renew={loginRenew}
       />

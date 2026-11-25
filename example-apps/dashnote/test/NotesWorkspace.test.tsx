@@ -100,6 +100,25 @@ afterEach(() => {
 });
 
 describe("NotesWorkspace", () => {
+  it("shows a restoring notice instead of the hero while a kept session is restored", () => {
+    mockUseSession.mockReturnValue(
+      makeSession({
+        status: "connecting",
+        keyManager: null,
+        identityId: "identity-1",
+        restoringWallet: true,
+      }),
+    );
+
+    render(<NotesWorkspace onOpenLogin={vi.fn()} onOpenSettings={vi.fn()} />);
+
+    expect(screen.getByText("Signing in with your wallet key…")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /sign in/i })).toBeNull();
+    expect(
+      screen.queryByText(/personal notes, stored on a public blockchain/i),
+    ).toBeNull();
+  });
+
   it("shows the sign-in hero when the session is not authenticated", () => {
     mockUseSession.mockReturnValue(
       makeSession({

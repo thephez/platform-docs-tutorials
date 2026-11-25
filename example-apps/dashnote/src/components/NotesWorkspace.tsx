@@ -51,7 +51,15 @@ export function NotesWorkspace({
   onOpenSettings: () => void;
 }) {
   const session = useSession();
-  const { status, sdk, keyManager, contractId, identityId, log } = session;
+  const {
+    status,
+    sdk,
+    keyManager,
+    contractId,
+    identityId,
+    restoringWallet,
+    log,
+  } = session;
   const isDesktop = useMediaQuery("(min-width: 768px)");
 
   const initialCachedNotes =
@@ -641,7 +649,9 @@ export function NotesWorkspace({
 
   return (
     <div className="space-y-5 max-md:flex max-md:min-h-0 max-md:flex-1 max-md:flex-col max-md:space-y-2">
-      {!canRead ? (
+      {!canRead && restoringWallet ? (
+        <RestoringNotice />
+      ) : !canRead ? (
         <SignInHero onOpenLogin={onOpenLogin} />
       ) : !contractReady ? (
         <EmptyState
@@ -790,6 +800,18 @@ function EmptyState({
         </div>
       )}
     </div>
+  );
+}
+
+// A kept wallet session is being restored: no sign-in prompt until it settles.
+function RestoringNotice() {
+  return (
+    <section
+      aria-live="polite"
+      className="rounded-[24px] border border-line bg-surface px-12 py-14 text-center text-[13px] text-ink-3 max-md:flex max-md:flex-1 max-md:flex-col max-md:justify-center max-md:rounded-none max-md:border-0 max-md:px-6 max-md:py-10"
+    >
+      Signing in with your wallet key…
+    </section>
   );
 }
 
