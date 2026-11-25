@@ -176,7 +176,6 @@ export function LoginModal({
                 ? session.rememberedIdentityId
                 : null
           }
-          rememberMe={rememberMe}
           renew={renew}
           onBack={() => {
             returnFocusRef.current = true;

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render } from "@testing-library/react";
-import { useContext, type ReactNode } from "react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { StrictMode, useContext, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -24,16 +24,34 @@ const {
   mockToastSuccess: vi.fn(),
 }));
 
-const { mockReadWalletGrant, mockClassifyWalletWriteError } = vi.hoisted(
-  () => ({
-    mockReadWalletGrant: vi.fn(),
-    mockClassifyWalletWriteError: vi.fn(),
-  }),
-);
+const {
+  mockReadWalletGrant,
+  mockClassifyWalletWriteError,
+  mockRestoreWalletLogin,
+} = vi.hoisted(() => ({
+  mockReadWalletGrant: vi.fn(),
+  mockClassifyWalletWriteError: vi.fn(),
+  mockRestoreWalletLogin: vi.fn(),
+}));
 
 vi.mock("../src/dash/appConnect", () => ({
   readWalletGrant: mockReadWalletGrant,
   classifyWalletWriteError: mockClassifyWalletWriteError,
+  restoreWalletLogin: mockRestoreWalletLogin,
+}));
+
+const store = vi.hoisted(() => ({
+  peekWalletSession: vi.fn(),
+  loadWalletSession: vi.fn(),
+  clearWalletSession: vi.fn(),
+}));
+
+vi.mock("../src/lib/walletSessionStore", () => ({
+  walletSessionStorageAvailable: vi.fn().mockResolvedValue(true),
+  saveWalletSession: vi.fn().mockResolvedValue(undefined),
+  peekWalletSession: store.peekWalletSession,
+  loadWalletSession: store.loadWalletSession,
+  clearWalletSession: store.clearWalletSession,
 }));
 
 vi.mock("../../../setupDashClient-core.mjs", () => ({
@@ -124,6 +142,13 @@ beforeEach(() => {
   mockLoginWithPrivateKey.mockReset();
   mockReadWalletGrant.mockReset();
   mockClassifyWalletWriteError.mockReset();
+  mockRestoreWalletLogin.mockReset();
+  store.peekWalletSession.mockReset();
+  store.loadWalletSession.mockReset();
+  store.clearWalletSession.mockReset();
+  store.peekWalletSession.mockResolvedValue(null);
+  store.loadWalletSession.mockResolvedValue(null);
+  store.clearWalletSession.mockResolvedValue(undefined);
   mockResolveDpnsName.mockImplementation(async (sdk, identityId) => {
     const result = await sdk.dpns.username(identityId);
     if (typeof result !== "string" || result.length === 0) return null;
@@ -962,6 +987,302 @@ describe("SessionProvider", () => {
       expect(mockToastError).not.toHaveBeenCalled();
       expect(ref.current.walletGrant).toEqual(grant);
       expect(ref.current.status).toBe("authenticated");
+    });
+
+    it("staying signed in also remembers the identity", async () => {
+      const ref = mountSession();
+      await act(async () => {
+        await ref.current.loginWithWallet(
+          { identityId: "wallet-identity", auth: auth as never, grant },
+          { rememberMe: false, staySignedIn: true },
+        );
+      });
+      expect(ref.current.rememberedIdentityId).toBe("wallet-identity");
+      expect(
+        JSON.parse(localStorage.getItem(REMEMBERED_KEY) ?? "null"),
+      ).toEqual({ id: "wallet-identity", name: null });
+      expect(ref.current.walletSessionKept).toBe(true);
+    });
+
+    it("a sign-in without staying signed in keeps the session to this tab", async () => {
+      const ref = await signInWithWallet();
+      expect(ref.current.walletSessionKept).toBe(false);
+    });
+
+    describe("dropping the kept session", () => {
+      async function keptSession() {
+        localStorage.setItem("dashnote.contractId", "contract-abc");
+        const ref = mountSession();
+        await act(async () => {
+          await ref.current.loginWithWallet(
+            { identityId: "wallet-identity", auth: auth as never, grant },
+            { staySignedIn: true },
+          );
+        });
+        store.clearWalletSession.mockClear();
+        return ref;
+      }
+
+      it("on logout", async () => {
+        const ref = await keptSession();
+        act(() => ref.current.logout());
+        expect(store.clearWalletSession).toHaveBeenCalledTimes(1);
+        expect(ref.current.walletSessionKept).toBe(false);
+      });
+
+      it("on forgetting the identity", async () => {
+        const ref = await keptSession();
+        act(() => ref.current.forgetIdentity());
+        expect(store.clearWalletSession).toHaveBeenCalledTimes(1);
+        expect(ref.current.walletSessionKept).toBe(false);
+      });
+
+      it("on a mnemonic or WIF sign-in", async () => {
+        const ref = await keptSession();
+        mockKeyManagerCreate.mockResolvedValue({ identityId: "mnemonic-id" });
+        await act(async () => {
+          await ref.current.login("test mnemonic");
+        });
+        expect(store.clearWalletSession).toHaveBeenCalledTimes(1);
+        expect(ref.current.walletSessionKept).toBe(false);
+      });
+
+      it("not on a mnemonic sign-in that fails", async () => {
+        const ref = await keptSession();
+        mockKeyManagerCreate.mockRejectedValue(new Error("bad mnemonic"));
+        await act(async () => {
+          await ref.current.login("test mnemonic").catch(() => {});
+        });
+        expect(store.clearWalletSession).not.toHaveBeenCalled();
+        expect(ref.current.walletSessionKept).toBe(true);
+      });
+
+      it("on switching away from the key's contract", async () => {
+        const ref = await keptSession();
+        act(() => ref.current.setContractId("contract-xyz"));
+        expect(store.clearWalletSession).toHaveBeenCalledTimes(1);
+      });
+
+      it("when a refresh finds the key gone", async () => {
+        const ref = await keptSession();
+        mockReadWalletGrant.mockResolvedValue(null);
+        await act(async () => {
+          await ref.current.refreshWalletGrant();
+        });
+        expect(store.clearWalletSession).toHaveBeenCalledTimes(1);
+      });
+
+      it("when a write shows the key was revoked", async () => {
+        const ref = await keptSession();
+        mockClassifyWalletWriteError.mockReturnValue("logout");
+        await act(async () => {
+          await ref.current.reportWriteError(new Error("disabled"));
+        });
+        expect(store.clearWalletSession).toHaveBeenCalledTimes(1);
+      });
+
+      it("swallows a failure to clear", async () => {
+        const ref = await keptSession();
+        store.clearWalletSession.mockRejectedValue(new Error("blocked"));
+        act(() => ref.current.logout());
+        await act(async () => {});
+        expect(ref.current.status).toBe("browsing");
+      });
+    });
+  });
+
+  describe("restoring a kept wallet session", () => {
+    const grant = {
+      keyId: 5,
+      contractId: "contract-abc",
+      totalBudget: 10_000_000_000n,
+      remainingBudget: 9_000_000_000n,
+      expiresAt: 1_800_000_000_000,
+    };
+    const auth = { identity: {}, identityKey: undefined, signer: {} };
+    const stored = {
+      identityId: "wallet-identity",
+      keyId: 5,
+      contractId: "contract-abc",
+      totalBudget: 10_000_000_000n,
+      expiresAt: 1_800_000_000_000,
+      grantedAt: 1_700_000_000_000,
+    };
+    let privateKey: Uint8Array;
+
+    beforeEach(() => {
+      localStorage.setItem("dashnote.contractId", "contract-abc");
+      localStorage.setItem(
+        REMEMBERED_KEY,
+        JSON.stringify({ id: "wallet-identity", name: "alice" }),
+      );
+      privateKey = new Uint8Array(32).fill(7);
+      store.peekWalletSession.mockResolvedValue(stored);
+      store.loadWalletSession.mockResolvedValue({
+        session: stored,
+        privateKey,
+      });
+      mockRestoreWalletLogin.mockResolvedValue({
+        login: { identityId: "wallet-identity", auth, grant },
+        renewNeeded: false,
+      });
+    });
+
+    async function settle(ref: { current: SessionValue }) {
+      await waitFor(() => expect(ref.current.restoringWallet).toBe(false));
+    }
+
+    it("signs back in with the kept key for the remembered identity", async () => {
+      mockDpnsUsername.mockResolvedValue("alice.dash");
+      const ref = mountSession();
+      expect(ref.current.restoringWallet).toBe(true);
+      await settle(ref);
+
+      expect(mockRestoreWalletLogin).toHaveBeenCalledWith(
+        expect.anything(),
+        { identityId: "wallet-identity", keyId: 5, contractId: "contract-abc" },
+        privateKey,
+      );
+      expect(ref.current.status).toBe("authenticated");
+      expect(ref.current.identityId).toBe("wallet-identity");
+      expect(ref.current.walletGrant).toEqual(grant);
+      expect(ref.current.walletSessionKept).toBe(true);
+      expect(ref.current.walletNotice).toBeNull();
+      expect(ref.current.rememberedIdentityId).toBe("wallet-identity");
+      expect(await ref.current.keyManager?.getAuth()).toBe(auth);
+      expect(store.clearWalletSession).not.toHaveBeenCalled();
+    });
+
+    it("asks for a renewal when the kept key can no longer write", async () => {
+      mockRestoreWalletLogin.mockResolvedValue({
+        login: { identityId: "wallet-identity", auth, grant },
+        renewNeeded: true,
+      });
+      const ref = mountSession();
+      await settle(ref);
+      expect(ref.current.status).toBe("authenticated");
+      expect(ref.current.walletNotice).toBe("renew");
+    });
+
+    it("drops a session kept for another identity", async () => {
+      localStorage.setItem(
+        REMEMBERED_KEY,
+        JSON.stringify({ id: "someone-else" }),
+      );
+      const ref = mountSession();
+      await settle(ref);
+      expect(store.clearWalletSession).toHaveBeenCalledTimes(1);
+      expect(store.loadWalletSession).not.toHaveBeenCalled();
+      expect(ref.current.status).toBe("browsing");
+      expect(ref.current.identityId).toBe("someone-else");
+    });
+
+    it("drops a kept session when no identity is remembered", async () => {
+      localStorage.removeItem(REMEMBERED_KEY);
+      const ref = mountSession();
+      expect(ref.current.restoringWallet).toBe(false);
+      await waitFor(() =>
+        expect(store.clearWalletSession).toHaveBeenCalledTimes(1),
+      );
+      expect(store.loadWalletSession).not.toHaveBeenCalled();
+      expect(ref.current.status).toBe("idle");
+    });
+
+    it("drops a session kept for another contract", async () => {
+      localStorage.setItem("dashnote.contractId", "contract-xyz");
+      const ref = mountSession();
+      await settle(ref);
+      expect(store.clearWalletSession).toHaveBeenCalledTimes(1);
+      expect(store.loadWalletSession).not.toHaveBeenCalled();
+      expect(ref.current.status).toBe("browsing");
+    });
+
+    it("forgets a key the wallet no longer honours and browses", async () => {
+      mockRestoreWalletLogin.mockResolvedValue(null);
+      const ref = mountSession();
+      await settle(ref);
+      expect(store.clearWalletSession).toHaveBeenCalledTimes(1);
+      expect(ref.current.status).toBe("browsing");
+      expect(ref.current.keyManager).toBeNull();
+      expect(ref.current.identityId).toBe("wallet-identity");
+      const entry = ref.current.activityLog.find(
+        (e) =>
+          e.message === "Your wallet key is no longer valid. Sign in again.",
+      );
+      expect(entry?.level).toBe("info");
+      expect(mockToastError).not.toHaveBeenCalled();
+    });
+
+    it("keeps the record when the network fails, and browses", async () => {
+      mockRestoreWalletLogin.mockRejectedValue(new Error("node down"));
+      const ref = mountSession();
+      await settle(ref);
+      expect(store.clearWalletSession).not.toHaveBeenCalled();
+      expect(ref.current.status).toBe("browsing");
+      expect(ref.current.keyManager).toBeNull();
+      expect(mockToastError).not.toHaveBeenCalled();
+      expect(
+        ref.current.activityLog.some((e) => e.message.includes("node down")),
+      ).toBe(true);
+    });
+
+    it("keeps the record when connecting fails", async () => {
+      mockCreateClient.mockRejectedValue(new Error("no route"));
+      const ref = mountSession();
+      await settle(ref);
+      expect(store.clearWalletSession).not.toHaveBeenCalled();
+      expect(store.loadWalletSession).not.toHaveBeenCalled();
+      expect(ref.current.status).toBe("browsing");
+      expect(ref.current.sdk).toBeNull();
+    });
+
+    it("treats unreadable storage as no record", async () => {
+      store.peekWalletSession.mockRejectedValue(new Error("blocked"));
+      const ref = mountSession();
+      await settle(ref);
+      expect(store.loadWalletSession).not.toHaveBeenCalled();
+      expect(store.clearWalletSession).not.toHaveBeenCalled();
+      expect(ref.current.status).toBe("browsing");
+    });
+
+    it("does not sign back in after a logout during the restore", async () => {
+      let finish!: (value: unknown) => void;
+      mockRestoreWalletLogin.mockReturnValue(
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+      );
+      const ref = mountSession();
+      await waitFor(() => expect(mockRestoreWalletLogin).toHaveBeenCalled());
+      act(() => ref.current.logout());
+      await act(async () => {
+        finish({
+          login: { identityId: "wallet-identity", auth, grant },
+          renewNeeded: false,
+        });
+      });
+      await settle(ref);
+      expect(ref.current.status).not.toBe("authenticated");
+      expect(ref.current.walletGrant).toBeNull();
+      expect(ref.current.walletSessionKept).toBe(false);
+    });
+
+    it("restores once under StrictMode", async () => {
+      const ref = { current: null as unknown as SessionValue };
+      render(
+        <StrictMode>
+          <SessionProvider>
+            <Harness
+              onValue={(value) => {
+                ref.current = value;
+              }}
+            />
+          </SessionProvider>
+        </StrictMode>,
+      );
+      await settle(ref);
+      expect(ref.current.status).toBe("authenticated");
+      expect(mockRestoreWalletLogin).toHaveBeenCalledTimes(1);
     });
   });
 

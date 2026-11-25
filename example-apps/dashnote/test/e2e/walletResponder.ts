@@ -114,6 +114,17 @@ export function addedWalletKeyIds(): number[] {
   return [...addedKeyIds];
 }
 
+/** Ids of the identity's keys that are not disabled, read from chain. */
+export async function liveIdentityKeyIds(): Promise<number[]> {
+  const { sdk, km } = await wallet();
+  const identity = await sdk.identities.fetch(km.identityId);
+  if (!identity) throw new Error(`identity ${km.identityId} not found`);
+  return identity.publicKeys
+    .filter((k) => k.disabledAt == null)
+    .map((k) => k.keyId)
+    .sort((a, b) => a - b);
+}
+
 /** The wallet's checks; throws on any request DashPay would refuse. */
 function checkRequest(
   request: AppConnectRequest,

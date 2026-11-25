@@ -29,17 +29,30 @@ vi.mock("../src/hooks/useWifPreview", () => ({
   useWifPreview: mockUseWifPreview,
 }));
 
+vi.mock("../src/lib/walletSessionStore", () => ({
+  walletSessionStorageAvailable: vi.fn().mockResolvedValue(true),
+  saveWalletSession: vi.fn().mockResolvedValue(undefined),
+  peekWalletSession: vi.fn().mockResolvedValue(null),
+  loadWalletSession: vi.fn().mockResolvedValue(null),
+  clearWalletSession: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("../src/components/WalletSignIn", () => ({
   WalletSignIn: (props: {
     identityHint: string | null;
-    rememberMe: boolean;
     renew?: boolean;
     onBack: () => void;
     onSignedIn: () => void;
   }) => (
     <div data-testid="wallet-sign-in">
       <span>hint:{String(props.identityHint)}</span>
-      <span>remember:{String(props.rememberMe)}</span>
+      <span>
+        props:
+        {Object.keys(props)
+          .filter((key) => !key.startsWith("on"))
+          .sort()
+          .join(",")}
+      </span>
       <span>renew:{String(Boolean(props.renew))}</span>
       <button type="button" onClick={props.onBack}>
         Wallet back
@@ -864,7 +877,6 @@ describe("LoginModal", () => {
       fireEvent.click(continueButton);
       expect(screen.getByTestId("wallet-sign-in")).toBeTruthy();
       expect(screen.getByText("hint:null")).toBeTruthy();
-      expect(screen.getByText("remember:true")).toBeTruthy();
       expect(screen.queryByPlaceholderText(/mnemonic phrase/i)).toBeNull();
 
       fireEvent.click(screen.getByRole("button", { name: "Wallet back" }));
@@ -880,7 +892,7 @@ describe("LoginModal", () => {
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
-    it("passes the remembered identity and the remember choice along", () => {
+    it("passes the remembered identity along, but not the remember choice", () => {
       mockUseSession.mockReturnValue(
         makeSession({ rememberedIdentityId: "remembered-identity-id" }),
       );
@@ -890,7 +902,8 @@ describe("LoginModal", () => {
         screen.getByRole("button", { name: "Continue with DashPay" }),
       );
       expect(screen.getByText("hint:remembered-identity-id")).toBeTruthy();
-      expect(screen.getByText("remember:false")).toBeTruthy();
+      // The wallet view asks to stay signed in on its own.
+      expect(screen.getByText("props:identityHint,renew")).toBeTruthy();
     });
 
     it("opens straight into a renewal for the signed-in identity", () => {
@@ -906,22 +919,7 @@ describe("LoginModal", () => {
       expect(screen.getByText("renew:true")).toBeTruthy();
     });
 
-    it("keeps an unremembered identity unremembered on renewal", () => {
-      mockUseSession.mockReturnValue(
-        makeSession({
-          status: "authenticated",
-          identityId: "signed-in-id",
-          rememberedIdentityId: null,
-          keyManager: { getAuth: vi.fn() },
-        }),
-      );
-      const props = { onClose: vi.fn(), initialView: "wallet" as const };
-      const { rerender } = render(<LoginModal open={false} {...props} renew />);
-      rerender(<LoginModal open {...props} renew />);
-      expect(screen.getByText("remember:false")).toBeTruthy();
-    });
-
-    it("keeps a remembered identity remembered on renewal", () => {
+    it("renews without passing a remember choice", () => {
       mockUseSession.mockReturnValue(
         makeSession({
           status: "authenticated",
@@ -933,7 +931,8 @@ describe("LoginModal", () => {
       const props = { onClose: vi.fn(), initialView: "wallet" as const };
       const { rerender } = render(<LoginModal open={false} {...props} renew />);
       rerender(<LoginModal open {...props} renew />);
-      expect(screen.getByText("remember:true")).toBeTruthy();
+      expect(screen.getByText("props:identityHint,renew")).toBeTruthy();
+      expect(screen.getByText("renew:true")).toBeTruthy();
     });
 
     it("returns to the form when reopened", () => {

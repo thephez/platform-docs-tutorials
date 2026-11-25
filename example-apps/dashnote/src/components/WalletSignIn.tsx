@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
   WalletAnswer,
+  WalletGrant,
   WalletLoginRequest,
   WalletPollStatus,
 } from "../dash/appConnect";
@@ -11,6 +12,12 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { loadConnectionId } from "../lib/connectionId";
 import { truncateId } from "../lib/format";
 import { errorMessage } from "../lib/logger";
+import {
+  clearWalletSession,
+  peekWalletSession,
+  saveWalletSession,
+  walletSessionStorageAvailable,
+} from "../lib/walletSessionStore";
 import { useSession } from "../session/useSession";
 import { OperationResultNotice } from "./OperationResultNotice";
 
@@ -30,7 +37,6 @@ function loadAppConnect(): Promise<AppConnectModule> {
 
 export interface WalletSignInProps {
   identityHint: string | null;
-  rememberMe: boolean;
   renew?: boolean;
   onSignedIn: () => void;
   onBack: () => void;
@@ -64,7 +70,6 @@ const primaryButton =
 
 export function WalletSignIn({
   identityHint,
-  rememberMe,
   renew = false,
   onSignedIn,
   onBack,
@@ -78,6 +83,15 @@ export function WalletSignIn({
   const [attempt, setAttempt] = useState(0);
   const [replacedCode, setReplacedCode] = useState(false);
   const [copied, setCopied] = useState(false);
+  // A renewal keeps whether this device already holds the session.
+  const [staySignedIn, setStaySignedIn] = useState(
+    renew ? session.walletSessionKept : true,
+  );
+  const stayTouchedRef = useRef(false);
+  const [storageAvailable, setStorageAvailable] = useState<boolean | null>(
+    null,
+  );
+  const keepKey = staySignedIn && storageAvailable !== false;
   const headingRef = useRef<HTMLHeadingElement>(null);
   const continueRef = useRef<HTMLButtonElement>(null);
   const aliveRef = useRef(true);
@@ -86,11 +100,30 @@ export function WalletSignIn({
   // Read through a ref so the poll effect doesn't restart whenever the
   // session object changes identity.
   const sessionRef = useRef(session);
-  const propsRef = useRef({ rememberMe, onSignedIn });
+  const propsRef = useRef({ keepKey, onSignedIn });
   useEffect(() => {
     sessionRef.current = session;
-    propsRef.current = { rememberMe, onSignedIn };
+    propsRef.current = { keepKey, onSignedIn };
   });
+
+  useEffect(() => {
+    let alive = true;
+    walletSessionStorageAvailable()
+      .catch(() => false)
+      .then((available) => {
+        if (alive) setStorageAvailable(available);
+      });
+    if (renew) {
+      peekWalletSession()
+        .catch(() => null)
+        .then((stored) => {
+          if (alive && !stayTouchedRef.current) setStaySignedIn(!!stored);
+        });
+    }
+    return () => {
+      alive = false;
+    };
+  }, [renew]);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -118,11 +151,43 @@ export function WalletSignIn({
       return;
     }
     setPhase({ kind: "signing-in" });
+    const staySignedIn = propsRef.current.keepKey;
+    const { identityId } = answer;
+    let kept = staySignedIn;
     try {
-      const login = await mod.loginWithWalletAnswer(connected, answer);
-      if (!aliveRef.current) return;
+      if (!staySignedIn) void clearWalletSession().catch(() => {});
+      const persist = staySignedIn
+        ? (grant: WalletGrant, privateKey: Uint8Array) =>
+            saveWalletSession(
+              {
+                identityId,
+                keyId: grant.keyId,
+                contractId: grant.contractId,
+                totalBudget: grant.totalBudget,
+                expiresAt: grant.expiresAt,
+                grantedAt: Date.now(),
+              },
+              privateKey,
+            ).catch(() => {
+              sessionRef.current.log(
+                "Couldn't keep the key on this device; you'll sign in again after a reload.",
+              );
+              kept = false;
+            })
+        : undefined;
+      const login = await mod.loginWithWalletAnswer(
+        connected,
+        answer,
+        persist ? { persist } : {},
+      );
+      if (!aliveRef.current) {
+        // Closed before the session took the key; don't leave it behind.
+        if (kept) void clearWalletSession().catch(() => {});
+        return;
+      }
       await sessionRef.current.loginWithWallet(login, {
-        rememberMe: propsRef.current.rememberMe,
+        rememberMe: staySignedIn,
+        staySignedIn: kept,
       });
       if (!aliveRef.current) return;
       propsRef.current.onSignedIn();
@@ -419,6 +484,32 @@ export function WalletSignIn({
               Try again
             </button>
           )}
+        </div>
+      )}
+
+      {sdk && contractId && (
+        <div className="flex flex-col gap-1">
+          <label className="flex items-start gap-2 text-[12px] text-ink-2">
+            <input
+              type="checkbox"
+              data-testid="wallet-stay-signed-in"
+              checked={keepKey}
+              disabled={
+                storageAvailable === false || phase.kind === "signing-in"
+              }
+              onChange={(event) => {
+                stayTouchedRef.current = true;
+                setStaySignedIn(event.target.checked);
+              }}
+              className="mt-0.5 h-3.5 w-3.5 accent-[color:var(--color-accent)]"
+            />
+            <span>Stay signed in on this device</span>
+          </label>
+          <p className="pl-5.5 text-[11px] text-ink-4">
+            {storageAvailable === false
+              ? "Your browser won't keep a key here (private window?)"
+              : "Keeps the wallet's key on this device until it expires. It can only write notes."}
+          </p>
         </div>
       )}
 

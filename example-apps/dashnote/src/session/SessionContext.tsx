@@ -2,6 +2,7 @@ import { toast } from "sonner";
 import {
   createContext,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -31,6 +32,12 @@ import {
   loadRememberedIdentity,
   saveRememberedIdentity,
 } from "../lib/rememberedIdentity";
+import {
+  clearWalletSession,
+  loadWalletSession,
+  peekWalletSession,
+  type StoredWalletSession,
+} from "../lib/walletSessionStore";
 import { keyManagerFromKey } from "./keyManagerFromKey";
 
 // The SDK + IdentityKeyManager pull in @dashevo/evo-sdk (and its ~8MB WASM
@@ -72,6 +79,10 @@ function loadAppConnect(): Promise<AppConnectModule> {
 // timeout per attempt, which stalls the wallet sign-in's polling.
 const CONNECTION_OPTIONS = { settings: { connectTimeoutMs: 5_000 } };
 
+function forgetStoredWalletSession() {
+  void clearWalletSession().catch(() => {});
+}
+
 export type SessionStatus =
   | "idle"
   | "connecting"
@@ -88,6 +99,12 @@ export interface LoginOptions {
 
 export type WalletNotice = "renew";
 
+export interface WalletLoginOptions {
+  rememberMe?: boolean;
+  /** The wallet's key was kept on this device; implies rememberMe. */
+  staySignedIn?: boolean;
+}
+
 export interface SessionValue {
   status: SessionStatus;
   error: string | null;
@@ -99,6 +116,10 @@ export interface SessionValue {
   dpnsName: string | null;
   walletGrant: WalletGrant | null;
   walletNotice: WalletNotice | null;
+  /** The wallet session survives a reload on this device. */
+  walletSessionKept: boolean;
+  /** A kept wallet session is being restored; boot waits for it. */
+  restoringWallet: boolean;
   setContractId: (id: string | null) => void;
   log: Logger;
   activityLog: LogEntry[];
@@ -106,7 +127,7 @@ export interface SessionValue {
   login: (secret: string, options?: LoginOptions) => Promise<void>;
   loginWithWallet: (
     login: WalletLogin,
-    options?: { rememberMe?: boolean },
+    options?: WalletLoginOptions,
   ) => Promise<void>;
   refreshWalletGrant: () => Promise<void>;
   reportWriteError: (err: unknown) => Promise<"renew" | "logout" | null>;
@@ -143,6 +164,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const [walletGrant, setWalletGrant] = useState<WalletGrant | null>(null);
   const [walletNotice, setWalletNotice] = useState<WalletNotice | null>(null);
+  const [walletSessionKept, setWalletSessionKept] = useState(false);
+  // Only a remembered identity can have a session to restore, so without
+  // one the boot never waits.
+  const [restoringWallet, setRestoringWallet] = useState(
+    initialRemembered !== null,
+  );
+  // Bumped by every sign-in and sign-out, so a restore still in flight
+  // can tell the session moved on without it.
+  const sessionEpochRef = useRef(0);
 
   // The grant a late wallet read, write error or contract switch may still
   // act on. Kept in step with the state synchronously, so nothing that
@@ -216,16 +246,59 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return connected;
   }, [log]);
 
+  // Everything after a key manager is in hand (DPNS caption, remember-me)
+  // is the same whether the key came from a mnemonic, a WIF, a wallet grant
+  // or a wallet session kept from an earlier load.
+  const enterAuthenticated = useCallback(
+    async (
+      connected: DashSdk,
+      resolvedKeyManager: DashKeyManager,
+      detail: string,
+      { rememberMe, grant }: { rememberMe: boolean; grant: WalletGrant | null },
+    ) => {
+      setKeyManager(resolvedKeyManager);
+      const resolvedId = resolvedKeyManager.identityId ?? null;
+      applyWalletGrant(grant, resolvedId);
+      setWalletNotice(null);
+      setIdentityId(resolvedId ?? null);
+      setStatus("authenticated");
+      log(`Identity resolved: ${resolvedId ?? "(unknown)"}`, {
+        level: "success",
+        detail,
+      });
+
+      // Resolve the DPNS name after auth so we can persist it alongside
+      // the identity ID — DPNS bindings are permanent, so what we save
+      // here is correct for every future load. A naming-service failure
+      // shouldn't kill an otherwise-valid session: caption is optional.
+      let resolvedName: string | null = null;
+      if (resolvedId) {
+        try {
+          resolvedName = await resolveDpnsName(connected, resolvedId);
+        } catch (dpnsErr) {
+          log(`DPNS lookup failed: ${errorMessage(dpnsErr)}`, "info");
+        }
+        setDpnsName(resolvedName);
+      }
+      if (rememberMe && resolvedId) {
+        saveRememberedIdentity({ id: resolvedId, name: resolvedName });
+        setRememberedIdentityId(resolvedId);
+      } else {
+        clearRememberedIdentity();
+        setRememberedIdentityId(null);
+      }
+    },
+    [log, applyWalletGrant],
+  );
+
   // Shared by every sign-in path: `resolve` turns a connected SDK into a key
-  // manager, and everything after that (DPNS caption, remember-me, failure
-  // restore) is the same whether the key came from a mnemonic, a WIF, or a
-  // wallet grant.
+  // manager; a failure restores the session the user had before.
   const authenticate = useCallback(
     async (
       resolve: (
         connected: DashSdk,
       ) => Promise<{ keyManager: DashKeyManager; detail: string }>,
-      { rememberMe, grant }: { rememberMe: boolean; grant: WalletGrant | null },
+      options: { rememberMe: boolean; grant: WalletGrant | null },
     ) => {
       // Snapshot session state so a failed login can restore the user's
       // prior context instead of clobbering it. Without this, mistyping a
@@ -236,43 +309,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const priorDpnsName = dpnsName;
       const priorWalletGrant = walletGrant;
       const priorWalletNotice = walletNotice;
+      sessionEpochRef.current += 1;
       setError(null);
       try {
         const connected = sdk ?? (await connect());
         const { keyManager: resolvedKeyManager, detail } =
           await resolve(connected);
-
-        setKeyManager(resolvedKeyManager);
-        const resolvedId = resolvedKeyManager.identityId ?? null;
-        applyWalletGrant(grant, resolvedId);
-        setWalletNotice(null);
-        setIdentityId(resolvedId ?? null);
-        setStatus("authenticated");
-        log(`Identity resolved: ${resolvedId ?? "(unknown)"}`, {
-          level: "success",
+        await enterAuthenticated(
+          connected,
+          resolvedKeyManager,
           detail,
-        });
-
-        // Resolve the DPNS name after auth so we can persist it alongside
-        // the identity ID — DPNS bindings are permanent, so what we save
-        // here is correct for every future load. A naming-service failure
-        // shouldn't kill an otherwise-valid session: caption is optional.
-        let resolvedName: string | null = null;
-        if (resolvedId) {
-          try {
-            resolvedName = await resolveDpnsName(connected, resolvedId);
-          } catch (dpnsErr) {
-            log(`DPNS lookup failed: ${errorMessage(dpnsErr)}`, "info");
-          }
-          setDpnsName(resolvedName);
-        }
-        if (rememberMe && resolvedId) {
-          saveRememberedIdentity({ id: resolvedId, name: resolvedName });
-          setRememberedIdentityId(resolvedId);
-        } else {
-          clearRememberedIdentity();
-          setRememberedIdentityId(null);
-        }
+          options,
+        );
       } catch (err) {
         const message = errorMessage(err);
         setError(message);
@@ -320,6 +368,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       connect,
       log,
       applyWalletGrant,
+      enterAuthenticated,
     ],
   );
 
@@ -370,15 +419,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         },
         { rememberMe, grant: null },
       );
+      setWalletSessionKept(false);
+      forgetStoredWalletSession();
     },
     [authenticate],
   );
 
   const loginWithWallet = useCallback(
-    async (
-      walletLogin: WalletLogin,
-      options: { rememberMe?: boolean } = {},
-    ) => {
+    async (walletLogin: WalletLogin, options: WalletLoginOptions = {}) => {
+      const staySignedIn = options.staySignedIn ?? false;
       await authenticate(
         async () => ({
           keyManager: keyManagerFromKey(
@@ -387,8 +436,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           ),
           detail: "loginWithWalletAnswer",
         }),
-        { rememberMe: options.rememberMe ?? false, grant: walletLogin.grant },
+        {
+          rememberMe: (options.rememberMe ?? false) || staySignedIn,
+          grant: walletLogin.grant,
+        },
       );
+      setWalletSessionKept(staySignedIn);
     },
     [authenticate],
   );
@@ -463,6 +516,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (rememberedIdentityId) clearCachedNotes(rememberedIdentityId);
     clearRememberedIdentity();
     setRememberedIdentityId(null);
+    // A kept wallet session only restores for the remembered identity.
+    sessionEpochRef.current += 1;
+    forgetStoredWalletSession();
+    setWalletSessionKept(false);
     setDpnsName(null);
     if (status === "browsing") {
       setKeyManager(null);
@@ -473,6 +530,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [status, sdk, rememberedIdentityId, log]);
 
   const logout = useCallback(() => {
+    sessionEpochRef.current += 1;
+    forgetStoredWalletSession();
+    setWalletSessionKept(false);
     setKeyManager(null);
     applyWalletGrant(null, null);
     setWalletNotice(null);
@@ -488,6 +548,100 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setStatus(sdk ? "readonly" : "idle");
     log("Logged out.");
   }, [sdk, rememberedIdentityId, log, applyWalletGrant]);
+
+  // A wallet session kept on this device signs back in on load, but only
+  // for the remembered identity and the contract its key is bound to.
+  const restoreStartedRef = useRef(false);
+  useEffect(() => {
+    if (restoreStartedRef.current) return;
+    restoreStartedRef.current = true;
+    const epoch = sessionEpochRef.current;
+    const current = () => sessionEpochRef.current === epoch;
+
+    async function restore(stored: StoredWalletSession) {
+      let connected: DashSdk;
+      let privateKey: Uint8Array | null = null;
+      try {
+        connected = await connect();
+        if (!current()) return;
+        const loaded = await loadWalletSession();
+        if (!current()) {
+          loaded?.privateKey.fill(0);
+          return;
+        }
+        if (!loaded || loaded.session.identityId !== stored.identityId) {
+          loaded?.privateKey.fill(0);
+          forgetStoredWalletSession();
+          log("Your wallet key is no longer valid. Sign in again.");
+          setStatus("browsing");
+          return;
+        }
+        privateKey = loaded.privateKey;
+        const { restoreWalletLogin } = await loadAppConnect();
+        const key = {
+          identityId: loaded.session.identityId,
+          keyId: loaded.session.keyId,
+          contractId: loaded.session.contractId,
+        };
+        // restoreWalletLogin wipes the bytes whatever happens.
+        const handed = privateKey;
+        privateKey = null;
+        const restored = await restoreWalletLogin(connected, key, handed);
+        if (!current()) return;
+        if (!restored) {
+          forgetStoredWalletSession();
+          log("Your wallet key is no longer valid. Sign in again.");
+          setStatus("browsing");
+          return;
+        }
+        if (loadStoredContractId() !== key.contractId) {
+          forgetStoredWalletSession();
+          log(
+            "Your wallet key is bound to the previous contract. Sign in again to use this one.",
+          );
+          setStatus("browsing");
+          return;
+        }
+        await enterAuthenticated(
+          connected,
+          keyManagerFromKey(restored.login.identityId, restored.login.auth),
+          "restoreWalletLogin",
+          { rememberMe: true, grant: restored.login.grant },
+        );
+        setWalletSessionKept(true);
+        if (restored.renewNeeded) setWalletNotice("renew");
+      } catch (err) {
+        privateKey?.fill(0);
+        if (!current()) return;
+        // Kept for the next load: a network failure says nothing about the key.
+        log(`Couldn't restore the wallet session: ${errorMessage(err)}`);
+        setStatus("browsing");
+      }
+    }
+
+    void (async () => {
+      let stored: StoredWalletSession | null = null;
+      try {
+        stored = await peekWalletSession();
+      } catch {
+        stored = null;
+      }
+      const remembered = loadRememberedIdentity();
+      const contract = loadStoredContractId();
+      if (
+        stored &&
+        (stored.identityId !== remembered?.id || stored.contractId !== contract)
+      ) {
+        forgetStoredWalletSession();
+        stored = null;
+      }
+      try {
+        if (stored && current()) await restore(stored);
+      } finally {
+        setRestoringWallet(false);
+      }
+    })();
+  }, [connect, log, enterAuthenticated]);
 
   const setContractId = useCallback(
     (id: string | null) => {
@@ -602,6 +756,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       dpnsName,
       walletGrant,
       walletNotice,
+      walletSessionKept,
+      restoringWallet,
       setContractId,
       log,
       activityLog,
@@ -627,6 +783,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       dpnsName,
       walletGrant,
       walletNotice,
+      walletSessionKept,
+      restoringWallet,
       setContractId,
       log,
       activityLog,

@@ -218,6 +218,15 @@ export function SettingsPanel({
             <dd className="text-right font-mono text-accent-dim">
               {truncateId(session.walletGrant.contractId)}
             </dd>
+            <dt className="text-ink-3">On this device</dt>
+            <dd
+              data-testid="wallet-session-kept"
+              className="text-right text-ink-2"
+            >
+              {session.walletSessionKept
+                ? "Kept until it expires"
+                : "This tab only"}
+            </dd>
           </dl>
           <div className="flex flex-wrap gap-2">
             <button
@@ -342,6 +351,8 @@ export function SettingsPanel({
             <p className="text-[11px] text-ink-4">
               Removes the remembered identity and clears its cached notes from
               this browser.
+              {session.walletGrant &&
+                " The wallet still holds the connection; Disconnect in DashPay to revoke the key."}
             </p>
           </div>
         </Section>

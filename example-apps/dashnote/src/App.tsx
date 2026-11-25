@@ -33,7 +33,8 @@ const screenCopy: Record<TopTab, { title: string; subtitle: string }> = {
 
 function App() {
   const session = useSession();
-  const { status, sdk, enterReadOnly, viewAsRemembered } = session;
+  const { status, sdk, restoringWallet, enterReadOnly, viewAsRemembered } =
+    session;
   const [tab, setTab] = useState<TopTab>("notes");
   const [loginOpen, setLoginOpen] = useState(false);
   const [loginView, setLoginView] = useState<LoginView>("form");
@@ -44,9 +45,10 @@ function App() {
   const mobileFullBleed = tab === "notes";
 
   useEffect(() => {
+    if (restoringWallet) return;
     if (status === "idle") void enterReadOnly();
     else if (status === "browsing" && !sdk) void viewAsRemembered();
-  }, [enterReadOnly, viewAsRemembered, status, sdk]);
+  }, [enterReadOnly, viewAsRemembered, status, sdk, restoringWallet]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

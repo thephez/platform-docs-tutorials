@@ -159,6 +159,28 @@ describe("App", () => {
     expect(session.enterReadOnly).not.toHaveBeenCalled();
   });
 
+  it("waits for a kept wallet session to restore before browsing", async () => {
+    const session = makeSession({
+      status: "browsing",
+      sdk: null,
+      rememberedIdentityId: "remembered-identity-id",
+      restoringWallet: true,
+    });
+    mockUseSession.mockReturnValue(session);
+
+    const { rerender } = render(<App />);
+    await Promise.resolve();
+    expect(session.viewAsRemembered).not.toHaveBeenCalled();
+    expect(session.enterReadOnly).not.toHaveBeenCalled();
+
+    const restored = { ...session, restoringWallet: false };
+    mockUseSession.mockReturnValue(restored);
+    rerender(<App />);
+    await waitFor(() => {
+      expect(restored.viewAsRemembered).toHaveBeenCalled();
+    });
+  });
+
   it("does not re-trigger viewAsRemembered once the SDK is initialized", async () => {
     const session = makeSession({
       status: "browsing",

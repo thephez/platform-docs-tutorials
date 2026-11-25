@@ -31,6 +31,14 @@ vi.mock("../src/lib/notesCache", () => ({
   clearCachedNotes: mockClearCachedNotes,
 }));
 
+vi.mock("../src/lib/walletSessionStore", () => ({
+  walletSessionStorageAvailable: vi.fn().mockResolvedValue(true),
+  saveWalletSession: vi.fn().mockResolvedValue(undefined),
+  peekWalletSession: vi.fn().mockResolvedValue(null),
+  loadWalletSession: vi.fn().mockResolvedValue(null),
+  clearWalletSession: vi.fn().mockResolvedValue(undefined),
+}));
+
 interface SessionOverrides {
   status?: string;
   identityId?: string | null;
@@ -45,6 +53,7 @@ interface SessionOverrides {
   log?: ReturnType<typeof vi.fn>;
   walletGrant?: unknown;
   walletNotice?: "renew" | null;
+  walletSessionKept?: boolean;
   refreshWalletGrant?: ReturnType<typeof vi.fn>;
   dismissWalletNotice?: ReturnType<typeof vi.fn>;
 }
@@ -68,6 +77,7 @@ function makeSession(overrides: SessionOverrides = {}) {
     forgetIdentity: vi.fn(),
     walletGrant: null,
     walletNotice: null,
+    walletSessionKept: false,
     refreshWalletGrant: vi.fn().mockResolvedValue(undefined),
     dismissWalletNotice: vi.fn(),
     ...overrides,
@@ -271,6 +281,56 @@ describe("SettingsPanel", () => {
       );
       expect(block.textContent).toContain("7");
       expect(block.textContent).toContain("8d6heK6Cos…BdviBe8y");
+    });
+
+    it("says whether the session is kept on this device", () => {
+      mockUseSession.mockReturnValue(
+        makeSession({ walletGrant: grant, walletSessionKept: true }),
+      );
+      const { unmount } = render(
+        <SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />,
+      );
+      expect(screen.getByText("On this device")).toBeTruthy();
+      expect(screen.getByTestId("wallet-session-kept").textContent).toBe(
+        "Kept until it expires",
+      );
+      unmount();
+
+      mockUseSession.mockReturnValue(makeSession({ walletGrant: grant }));
+      render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
+      expect(screen.getByTestId("wallet-session-kept").textContent).toBe(
+        "This tab only",
+      );
+    });
+
+    it("tells a wallet user that forgetting leaves the wallet connected", () => {
+      const forgetIdentity = vi.fn();
+      mockUseSession.mockReturnValue(
+        makeSession({
+          walletGrant: grant,
+          walletSessionKept: true,
+          rememberedIdentityId: "id-1234567890",
+          forgetIdentity,
+        }),
+      );
+      render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
+      expect(
+        screen.getByText(
+          /The wallet still holds the connection; Disconnect in DashPay to revoke the key\./,
+        ),
+      ).toBeTruthy();
+      fireEvent.click(
+        screen.getByRole("button", { name: /forget this device/i }),
+      );
+      expect(forgetIdentity).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves the wallet out of Forget for a mnemonic session", () => {
+      mockUseSession.mockReturnValue(
+        makeSession({ rememberedIdentityId: "id-1234567890" }),
+      );
+      render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
+      expect(screen.queryByText(/The wallet still holds/)).toBeNull();
     });
 
     it("shows a grant without limits", () => {
