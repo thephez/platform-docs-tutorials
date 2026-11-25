@@ -147,25 +147,68 @@ function isSessionRecord(value: unknown): value is SessionRecord {
   );
 }
 
-// A synchronous marker beside the record. Clearing removes it before the
-// IndexedDB delete starts, so a delete that fails or is still in flight when
-// the tab closes cannot leave a key that signs the next load back in.
+// A synchronous marker beside the record, naming the grant it protects
+// ("identityId:keyId"). A reader accepts the record only when the marker
+// names it, so a clear that drops the marker first is final even if its
+// IndexedDB delete fails, a save that sets the marker first can crash
+// without leaving an older key restorable, and a clear for one grant can
+// never touch a record another tab saved for a different one.
 const ACTIVE_KEY = "dashnote.walletSession.active";
 
-function markActive(active: boolean): void {
+function grantTag(grant: { identityId: string; keyId: number }): string {
+  return `${grant.identityId}:${grant.keyId}`;
+}
+
+function hasLocalStorage(): boolean {
   try {
-    if (active) localStorage.setItem(ACTIVE_KEY, "1");
-    else localStorage.removeItem(ACTIVE_KEY);
+    const probe = `${ACTIVE_KEY}.probe`;
+    localStorage.setItem(probe, "1");
+    localStorage.removeItem(probe);
+    return true;
   } catch {
-    // no localStorage: the record alone decides
+    return false;
   }
 }
 
-function isMarkedActive(): boolean {
+function readMarker(): string | null {
   try {
-    return localStorage.getItem(ACTIVE_KEY) === "1";
+    return localStorage.getItem(ACTIVE_KEY);
   } catch {
-    return true;
+    return null;
+  }
+}
+
+function writeMarker(tag: string | null): void {
+  try {
+    if (tag === null) localStorage.removeItem(ACTIVE_KEY);
+    else localStorage.setItem(ACTIVE_KEY, tag);
+  } catch {
+    // without localStorage nothing is ever accepted; see storage availability
+  }
+}
+
+// Deletes the record only while it is still the given grant.
+async function deleteSessionIf(grant: {
+  identityId: string;
+  keyId: number;
+}): Promise<void> {
+  try {
+    await withStore<unknown>("readwrite", (store) => {
+      const get = store.get(SESSION);
+      get.onsuccess = () => {
+        const current = get.result as unknown;
+        if (
+          isSessionRecord(current) &&
+          current.identityId === grant.identityId &&
+          current.keyId === grant.keyId
+        ) {
+          store.delete(SESSION);
+        }
+      };
+      return get;
+    });
+  } catch {
+    // nothing more to do
   }
 }
 
@@ -203,13 +246,9 @@ async function readSession(): Promise<unknown> {
   } catch {
     return undefined;
   }
-  if (record !== undefined && !isMarkedActive()) {
-    // A clear removed the marker but its delete did not land.
-    try {
-      await withStore("readwrite", (store) => store.delete(SESSION));
-    } catch {
-      // storage is gone; nothing to keep anyway
-    }
+  if (isSessionRecord(record) && readMarker() !== grantTag(record)) {
+    // Cleared, or superseded by a save whose record is still on its way.
+    await deleteSessionIf(record);
     return undefined;
   }
   return record;
@@ -217,7 +256,7 @@ async function readSession(): Promise<unknown> {
 
 /** Whether this browser can keep a key here (IndexedDB and Web Crypto usable). */
 export async function walletSessionStorageAvailable(): Promise<boolean> {
-  if (!hasIndexedDb() || !hasSubtle()) return false;
+  if (!hasIndexedDb() || !hasSubtle() || !hasLocalStorage()) return false;
   try {
     const db = await openDb();
     db.close();
@@ -257,8 +296,10 @@ export async function saveWalletSession(
   }
 
   const record: SessionRecord = { ...pickSession(session), iv, ciphertext };
-  // Marked before the write, so a reader never sees a fresh record as stale.
-  markActive(true);
+  // The marker goes first: a reader never sees the new record as stale, and
+  // a crash before the write leaves nothing a reader would accept.
+  if (!hasLocalStorage()) throw unavailable();
+  writeMarker(grantTag(session));
   await withStore("readwrite", (store) => store.put(record, SESSION));
 }
 
@@ -315,32 +356,17 @@ export async function clearWalletSession(match?: {
   identityId: string;
   keyId: number;
 }): Promise<void> {
-  if (!hasIndexedDb()) {
-    if (!match) markActive(false);
+  if (!match) {
+    writeMarker(null);
+    if (!hasIndexedDb()) return;
+    try {
+      await withStore("readwrite", (store) => store.delete(SESSION));
+    } catch {
+      // nothing stored, or storage is gone
+    }
     return;
   }
-  try {
-    if (!match) {
-      markActive(false);
-      await withStore("readwrite", (store) => store.delete(SESSION));
-      return;
-    }
-    await withStore<unknown>("readwrite", (store) => {
-      const get = store.get(SESSION);
-      get.onsuccess = () => {
-        const current = get.result as unknown;
-        if (
-          isSessionRecord(current) &&
-          current.identityId === match.identityId &&
-          current.keyId === match.keyId
-        ) {
-          markActive(false);
-          store.delete(SESSION);
-        }
-      };
-      return get;
-    });
-  } catch {
-    // nothing stored, or storage is gone
-  }
+  if (readMarker() === grantTag(match)) writeMarker(null);
+  if (!hasIndexedDb()) return;
+  await deleteSessionIf(match);
 }

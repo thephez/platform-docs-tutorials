@@ -14,6 +14,14 @@ import {
 const DB_NAME = "dashnote.walletSession";
 const STORE = "records";
 
+// The marker beside the record lives in localStorage, which Node lacks.
+const storage = new Map<string, string>();
+const fakeLocalStorage = {
+  getItem: (k: string) => storage.get(k) ?? null,
+  setItem: (k: string, v: string) => void storage.set(k, v),
+  removeItem: (k: string) => void storage.delete(k),
+};
+
 const SESSION: StoredWalletSession = {
   identityId: "5DbLwAxGBzUzo81VewMUwn4b5P4bpv9FNFybi25XB5Bk",
   keyId: 7,
@@ -74,7 +82,9 @@ function contains(haystack: Uint8Array, needle: Uint8Array): boolean {
 
 describe("walletSessionStore", () => {
   beforeEach(() => {
+    storage.clear();
     vi.stubGlobal("indexedDB", new IDBFactory());
+    vi.stubGlobal("localStorage", fakeLocalStorage);
   });
 
   afterEach(() => {
@@ -144,6 +154,10 @@ describe("walletSessionStore", () => {
 
     // the device key that wrapped the old record is still there
     await writeRaw("session", record);
+    storage.set(
+      "dashnote.walletSession.active",
+      `${SESSION.identityId}:${SESSION.keyId}`,
+    );
     expect((await loadWalletSession())?.privateKey).toEqual(keyBytes(1));
 
     await saveWalletSession(SESSION, keyBytes(3));
@@ -245,11 +259,11 @@ describe("walletSessionStore", () => {
 });
 
 describe("the active marker and conditional clear", () => {
-  const storage = new Map<string, string>();
-  const fakeLocalStorage = {
-    getItem: (k: string) => storage.get(k) ?? null,
-    setItem: (k: string, v: string) => void storage.set(k, v),
-    removeItem: (k: string) => void storage.delete(k),
+  const TAG = `${SESSION.identityId}:${SESSION.keyId}`;
+  const OTHER = {
+    ...SESSION,
+    identityId: "6782Nd98GHD3vkBhcpkuECJEAbw8goDLXvB7EFAt13Ye",
+    keyId: 8,
   };
 
   beforeEach(() => {
@@ -260,6 +274,14 @@ describe("the active marker and conditional clear", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("names the saved grant in the marker and drops it on a clear", async () => {
+    await saveWalletSession(SESSION, keyBytes(1));
+    expect(storage.get("dashnote.walletSession.active")).toBe(TAG);
+    await clearWalletSession();
+    expect(storage.has("dashnote.walletSession.active")).toBe(false);
+    expect(await readRaw("session")).toBeUndefined();
   });
 
   it("ignores and removes a record whose clear did not land", async () => {
@@ -276,26 +298,54 @@ describe("the active marker and conditional clear", () => {
     expect(await readRaw("session")).toBeUndefined();
   });
 
-  it("marks a saved session active and a cleared one inactive before deleting", async () => {
+  it("ignores an older record once a newer save has claimed the marker", async () => {
     await saveWalletSession(SESSION, keyBytes(1));
-    expect(storage.get("dashnote.walletSession.active")).toBe("1");
-    await clearWalletSession();
-    expect(storage.has("dashnote.walletSession.active")).toBe(false);
+    // Another tab started saving a different grant and crashed before writing.
+    storage.set(
+      "dashnote.walletSession.active",
+      `${OTHER.identityId}:${OTHER.keyId}`,
+    );
+
+    expect(await peekWalletSession()).toBeNull();
     expect(await readRaw("session")).toBeUndefined();
   });
 
-  it("clears only a matching record when asked for a specific grant", async () => {
+  it("clears only a matching record and leaves another grant's marker alone", async () => {
     await saveWalletSession(SESSION, keyBytes(1));
 
     await clearWalletSession({ identityId: SESSION.identityId, keyId: 999 });
     expect(await peekWalletSession()).not.toBeNull();
-    expect(storage.get("dashnote.walletSession.active")).toBe("1");
+    expect(storage.get("dashnote.walletSession.active")).toBe(TAG);
 
+    // Another tab claimed the marker for its new grant; a matched clear for
+    // the old grant must not take that marker away.
+    storage.set(
+      "dashnote.walletSession.active",
+      `${OTHER.identityId}:${OTHER.keyId}`,
+    );
+    await clearWalletSession({
+      identityId: SESSION.identityId,
+      keyId: SESSION.keyId,
+    });
+    expect(storage.get("dashnote.walletSession.active")).toBe(
+      `${OTHER.identityId}:${OTHER.keyId}`,
+    );
+    expect(await readRaw("session")).toBeUndefined();
+
+    await saveWalletSession(SESSION, keyBytes(1));
     await clearWalletSession({
       identityId: SESSION.identityId,
       keyId: SESSION.keyId,
     });
     expect(await peekWalletSession()).toBeNull();
     expect(storage.has("dashnote.walletSession.active")).toBe(false);
+  });
+
+  it("reports storage unavailable without localStorage", async () => {
+    vi.stubGlobal("localStorage", undefined);
+    expect(await walletSessionStorageAvailable()).toBe(false);
+    await expect(saveWalletSession(SESSION, keyBytes(1))).rejects.toThrow(
+      "Wallet session storage is unavailable",
+    );
   });
 });
