@@ -673,6 +673,25 @@ describe("awaitWalletAnswer", () => {
     expect(sdk.documents.query).toHaveBeenCalledTimes(1);
   });
 
+  it("reports a slow read while a round's reads hang", async () => {
+    const req = newRequest(OWNER);
+    const doc = await answerDoc(req, OWNER, seed("granted key"));
+    const { asSdk } = stubSdk({
+      identities: { [OWNER]: [grantKey(seed("granted key"))] },
+      budgets: { 3: 1n },
+      query: () =>
+        new Promise((resolve) => setTimeout(() => resolve([doc]), 40)),
+    });
+    const statuses: WalletPollStatus[] = [];
+
+    await awaitWalletAnswer(asSdk, req, {
+      slowReadMs: 5,
+      onStatus: (s) => statuses.push(s),
+    });
+
+    expect(statuses).toEqual(["slow-read", "answered"]);
+  });
+
   it("rejects an answer whose read straddled the deadline", async () => {
     const req = newRequest(OWNER);
     const doc = await answerDoc(req, OWNER, seed("granted key"));

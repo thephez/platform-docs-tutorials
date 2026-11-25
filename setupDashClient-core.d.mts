@@ -7,7 +7,7 @@ import type {
   PlatformAddress,
   PlatformAddressInfo,
   PlatformAddressSigner,
-} from "@dashevo/evo-sdk";
+} from '@dashevo/evo-sdk';
 
 interface AddressEntry {
   address: PlatformAddress;
@@ -28,9 +28,9 @@ interface ConnectedDocumentTokenPaymentInfo {
   minimumTokenCost?: bigint;
   maximumTokenCost?: bigint;
   gasFeesPaidBy?:
-    | "documentOwner"
-    | "contractOwner"
-    | "preferContractOwner"
+    | 'documentOwner'
+    | 'contractOwner'
+    | 'preferContractOwner'
     | 0
     | 1
     | 2;
@@ -87,7 +87,7 @@ export interface ConnectedDashClientLike {
     }): Promise<unknown>;
     purchase(args: {
       document: ConnectedDocumentLike | undefined;
-      buyerId: Identity["id"];
+      buyerId: Identity['id'];
       price: bigint;
       identityKey: IdentityPublicKey | undefined;
       signer: IdentitySigner;
@@ -95,7 +95,7 @@ export interface ConnectedDashClientLike {
     delete(args: {
       document: {
         id: string;
-        ownerId: Identity["id"] | string;
+        ownerId: Identity['id'] | string;
         dataContractId: string;
         documentTypeName: string;
       };
@@ -208,4 +208,5 @@ export declare function dip13KeyPath(
 
 export declare function createClient(
   network?: string,
+  options?: ConnectionOptions,
 ): Promise<ConnectedDashClientLike & EvoSDK>;

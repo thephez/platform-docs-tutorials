@@ -77,7 +77,7 @@ Every SDK call lives in its own file under [`src/dash/`](./src/dash/). Open the 
 
 | Operation              | File                                                                   | SDK method                                                                                                   |
 | ---------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Connect to testnet     | [`src/dash/client.ts`](./src/dash/client.ts)                           | `EvoSDK.testnetTrusted()` + `sdk.connect()`                                                                  |
+| Connect to testnet     | [`src/dash/client.ts`](./src/dash/client.ts)                           | `EvoSDK.testnetTrusted({ settings })` + `sdk.connect()`                                                      |
 | Derive identity keys   | [`src/dash/keyManager.ts`](./src/dash/keyManager.ts)                   | wallet/key derivation helpers (mnemonic path)                                                                |
 | Login by private key   | [`src/dash/loginWithPrivateKey.ts`](./src/dash/loginWithPrivateKey.ts) | `PrivateKey.fromWIF` + `sdk.identities.fetch` / `byPublicKeyHash` / `byNonUniquePublicKeyHash`               |
 | Sign in with DashPay   | [`src/dash/appConnect.ts`](./src/dash/appConnect.ts)                   | `sdk.documents.query` on the App Connect contract + `sdk.identities.fetchWithProof` / `keysRemainingBudgets` |

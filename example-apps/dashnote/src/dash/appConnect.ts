@@ -183,7 +183,14 @@ export class PollTrigger {
   }
 }
 
-export type WalletPollStatus = "waiting" | "answered" | "incomplete-read";
+export type WalletPollStatus =
+  | "waiting"
+  | "answered"
+  | "incomplete-read"
+  | "slow-read";
+
+/** A round's reads taking longer than this are reported as `slow-read`. */
+export const SLOW_READ_MS = 10_000;
 
 export class RequestExpiredError extends Error {
   constructor() {
@@ -279,9 +286,16 @@ export async function awaitWalletAnswer(
     onStatus?: (status: WalletPollStatus) => void;
     settleMs?: number;
     now?: () => number;
+    slowReadMs?: number;
   } = {},
 ): Promise<WalletAnswer> {
-  const { signal, onStatus, settleMs = 3000, now = Date.now } = options;
+  const {
+    signal,
+    onStatus,
+    settleMs = 3000,
+    now = Date.now,
+    slowReadMs = SLOW_READ_MS,
+  } = options;
   const trigger = options.trigger ?? new PollTrigger();
   const responses = responsePort(sdk);
   const identity = identityPort(sdk);
@@ -302,59 +316,69 @@ export async function awaitWalletAnswer(
         throw new RequestExpiredError();
       }
 
-      const page = await listAppConnectCandidates(
-        responses,
-        req.requestHash,
-        hint ? { hint } : {},
-      ).catch(() => null);
-      if (signal?.aborted) throw abortError();
-      if (page?.truncated) throw new TooManyAnswersError();
-      let complete = page !== null;
+      // One timer for the whole round: a node that hangs on any of its reads
+      // shows as slow, and the SDK moves on to another node by itself.
+      const slowTimer = setTimeout(() => onStatus?.("slow-read"), slowReadMs);
+      let complete: boolean;
+      try {
+        const page = await listAppConnectCandidates(
+          responses,
+          req.requestHash,
+          hint ? { hint } : {},
+        ).catch(() => null);
+        if (signal?.aborted) throw abortError();
+        if (page?.truncated) throw new TooManyAnswersError();
+        complete = page !== null;
 
-      for (const candidate of page?.candidates ?? []) {
-        // Owners can delete and republish between polls, so the cap spans rounds.
-        owners.add(candidate.ownerId);
-        if (owners.size > APP_CONNECT_MAX_CANDIDATES) {
-          throw new TooManyAnswersError();
-        }
-        const key = appConnectCandidateKey(candidate);
-        if (decided.has(key)) continue;
-        const verdict = await verifyAppConnectCandidate({
-          request: req.request,
-          appEphemeralPrivateKey: req.appEphemeralPrivateKey,
-          candidate,
-          identity,
-          now: req.chainTimeAtCreation + (now() - req.createdAt),
-        }).catch(() => null);
-        if (signal?.aborted) {
-          // Not recorded yet, so the finally below would not wipe it.
-          if (verdict?.ok) wipeGrant(verdict.grant);
-          throw abortError();
-        }
-        if (verdict && !verdict.ok && NOT_AN_ANSWER.has(verdict.reason)) {
+        for (const candidate of page?.candidates ?? []) {
+          // Owners can delete and republish between polls, so the cap spans rounds.
+          owners.add(candidate.ownerId);
+          if (owners.size > APP_CONNECT_MAX_CANDIDATES) {
+            throw new TooManyAnswersError();
+          }
+          const key = appConnectCandidateKey(candidate);
+          if (decided.has(key)) continue;
+          const verdict = await verifyAppConnectCandidate({
+            request: req.request,
+            appEphemeralPrivateKey: req.appEphemeralPrivateKey,
+            candidate,
+            identity,
+            now: req.chainTimeAtCreation + (now() - req.createdAt),
+          }).catch(() => null);
+          if (signal?.aborted) {
+            // Not recorded yet, so the finally below would not wipe it.
+            if (verdict?.ok) wipeGrant(verdict.grant);
+            throw abortError();
+          }
+          if (verdict && !verdict.ok && NOT_AN_ANSWER.has(verdict.reason)) {
+            decided.add(key);
+            continue;
+          }
+          // Past decryption, so this identity did answer this request.
+          responders.add(candidate.ownerId);
+          if (verdict === null) {
+            complete = false;
+            continue;
+          }
+          if (!verdict.ok && verdict.retryable) {
+            // The node lags the wallet: this round settles nothing.
+            complete = false;
+            continue;
+          }
           decided.add(key);
-          continue;
+          const previous = answers.get(candidate.ownerId);
+          if (previous && !(previous instanceof Error)) {
+            wipeGrant(previous.grant);
+          }
+          answers.set(
+            candidate.ownerId,
+            verdict.ok
+              ? { identityId: candidate.ownerId, grant: verdict.grant }
+              : new WalletAnswerRefusedError(verdict.reason),
+          );
         }
-        // Past decryption, so this identity did answer this request.
-        responders.add(candidate.ownerId);
-        if (verdict === null) {
-          complete = false;
-          continue;
-        }
-        if (!verdict.ok && verdict.retryable) {
-          // The node lags the wallet: this round settles nothing.
-          complete = false;
-          continue;
-        }
-        decided.add(key);
-        const previous = answers.get(candidate.ownerId);
-        if (previous && !(previous instanceof Error)) wipeGrant(previous.grant);
-        answers.set(
-          candidate.ownerId,
-          verdict.ok
-            ? { identityId: candidate.ownerId, grant: verdict.grant }
-            : new WalletAnswerRefusedError(verdict.reason),
-        );
+      } finally {
+        clearTimeout(slowTimer);
       }
 
       if (responders.size > 1) {

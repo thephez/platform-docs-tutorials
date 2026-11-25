@@ -47,6 +47,7 @@ const STATUS_COPY: Record<WalletPollStatus, string> = {
   waiting: "Waiting for your wallet…",
   answered: "Checking the answer…",
   "incomplete-read": "Couldn't read every answer, retrying…",
+  "slow-read": "A testnet node is slow to answer. Still checking…",
 };
 
 // The answer holds the granted private key, so it lives outside render state
@@ -199,11 +200,21 @@ export function WalletSignIn({
         // Held here until the user answers "Is this you?"; the cleanup
         // below wipes it if this attempt ends first.
         pendingRef.current = { answer, mod };
+        setPhase({
+          kind: "confirm",
+          identityId: answer.identityId,
+          name: null,
+        });
+        // The name is a nicety; the id is already on screen.
         const name = await resolveDpnsName(sdk, answer.identityId).catch(
           () => null,
         );
-        if (signal.aborted) return;
-        setPhase({ kind: "confirm", identityId: answer.identityId, name });
+        if (signal.aborted || !name) return;
+        setPhase((current) =>
+          current.kind === "confirm" && current.identityId === answer.identityId
+            ? { ...current, name }
+            : current,
+        );
       } catch (err) {
         if (signal.aborted) return;
         releasePending();

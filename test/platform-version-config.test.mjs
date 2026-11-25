@@ -20,5 +20,14 @@ describe('Platform protocol version configuration', () => {
       assert.deepEqual(factory.mock.calls[0].arguments, []);
       assert.equal(sdk.connect.mock.callCount(), 1);
     });
+
+    it(`${network} forwards connection options as given`, async (t) => {
+      const sdk = { connect: t.mock.fn(async () => {}) };
+      const factory = t.mock.method(EvoSDK, factoryName, () => sdk);
+      const options = { settings: { connectTimeoutMs: 5000 } };
+
+      assert.equal(await createClient(network, options), sdk);
+      assert.deepEqual(factory.mock.calls[0].arguments, [options]);
+    });
   }
 });

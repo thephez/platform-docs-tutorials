@@ -68,6 +68,10 @@ function loadAppConnect(): Promise<AppConnectModule> {
   return appConnectPromise;
 }
 
+// A dead testnet node otherwise costs the browser's 20-second connect
+// timeout per attempt, which stalls the wallet sign-in's polling.
+const CONNECTION_OPTIONS = { settings: { connectTimeoutMs: 5_000 } };
+
 export type SessionStatus =
   | "idle"
   | "connecting"
@@ -200,7 +204,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       detail: 'createClient("testnet")',
     });
     const { createClient } = await loadSdkModule();
-    const connected = (await createClient("testnet")) as unknown as DashSdk;
+    const connected = (await createClient(
+      "testnet",
+      CONNECTION_OPTIONS,
+    )) as unknown as DashSdk;
     setSdk(connected);
     log("Connected to Dash Platform testnet.", {
       level: "info",
@@ -420,7 +427,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (!connected) {
         log("Connecting to Dash Platform testnet…");
         const { createClient } = await loadSdkModule();
-        connected = (await createClient("testnet")) as unknown as DashSdk;
+        connected = (await createClient(
+          "testnet",
+          CONNECTION_OPTIONS,
+        )) as unknown as DashSdk;
         setSdk(connected);
         log("Connected to Dash Platform testnet.");
       }

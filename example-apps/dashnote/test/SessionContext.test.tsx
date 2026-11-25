@@ -1059,3 +1059,21 @@ describe("SessionProvider", () => {
     });
   });
 });
+
+describe("connection settings", () => {
+  it("connects with a short connect timeout so a dead node fails fast", async () => {
+    mockCreateClient.mockResolvedValue({
+      documents: {},
+      dpns: { username: mockDpnsUsername },
+    });
+    const ref = mountSession();
+
+    await act(async () => {
+      await ref.current.enterReadOnly();
+    });
+
+    expect(mockCreateClient).toHaveBeenCalledWith("testnet", {
+      settings: { connectTimeoutMs: 5_000 },
+    });
+  });
+});

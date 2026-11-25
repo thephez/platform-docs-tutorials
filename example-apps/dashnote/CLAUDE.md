@@ -46,7 +46,7 @@ Schema lives in [src/dash/contract.ts](src/dash/contract.ts) as `NOTE_SCHEMAS`. 
 
 ## SDK Patterns
 
-- **Connect**: `await createClient("testnet")` from [client.ts](src/dash/client.ts) — re-exported from the shared core, which internally does `EvoSDK.testnetTrusted()` + `sdk.connect()`. App code never constructs the SDK directly.
+- **Connect**: `await createClient("testnet", { settings: { connectTimeoutMs: 5_000 } })` from [client.ts](src/dash/client.ts) — re-exported from the shared core, which internally does `EvoSDK.testnetTrusted(options)` + `sdk.connect()`. App code never constructs the SDK directly. The connect timeout matters for the wallet sign-in: without it a dead testnet node costs the browser's 20-second connect timeout on every attempt, and a poll round makes three reads.
 - **Key derivation**: `IdentityKeyManager` from the shared core; `keyManager.getAuth()` returns `{ identity, identityKey, signer }`
 - **Register contract**: `new DataContract({ ownerId, identityNonce, schemas, fullValidation })` then `sdk.contracts.publish({ dataContract, identityKey, signer })`. Nonce is `(sdk.identities.nonce(id) || 0n) + 1n`.
 - **Create note**: `sdk.documents.create({ document, identityKey, signer })` where `document = new Document({ properties: { title?, message }, documentTypeName: "note", dataContractId, ownerId })`
