@@ -19,6 +19,7 @@ import {
   readChainClock,
   readWalletGrant,
   responsePort,
+  restoreWalletLogin,
   type WalletLoginRequest,
   type WalletPollStatus,
 } from "../src/dash/appConnect";
@@ -1000,6 +1001,165 @@ describe("loginWithWalletAnswer", () => {
         grant: testGrant(privateKey),
       }),
     ).rejects.toThrow("nope");
+    expect(privateKey.every((b) => b === 0)).toBe(true);
+  });
+});
+
+describe("loginWithWalletAnswer persist hook", () => {
+  const FRESH_EXPIRES = GRANT_EXPIRES - 86_400_000;
+
+  it("hands the checked grant and the key bytes to persist before wiping them", async () => {
+    const privateKey = seed("granted key").slice();
+    const { asSdk } = stubSdk({
+      identities: {
+        [OWNER]: [
+          grantKey(seed("granted key"), { expiresAt: BigInt(FRESH_EXPIRES) }),
+        ],
+      },
+      budgets: { 3: 55n },
+    });
+    const seen: { grant: unknown; bytes: Uint8Array }[] = [];
+    const persist = vi.fn(async (grant: unknown, bytes: Uint8Array) => {
+      seen.push({ grant, bytes: bytes.slice() });
+    });
+
+    await loginWithWalletAnswer(
+      asSdk,
+      { identityId: OWNER, grant: testGrant(privateKey) },
+      { persist },
+    );
+
+    expect(persist).toHaveBeenCalledTimes(1);
+    expect(seen[0]!.grant).toEqual({
+      keyId: 3,
+      contractId: CONTRACT_ID,
+      totalBudget: DEFAULT_BUDGET_CREDITS,
+      remainingBudget: 55n,
+      expiresAt: FRESH_EXPIRES,
+    });
+    expect(seen[0]!.bytes).toEqual(seed("granted key"));
+    expect(privateKey.every((b) => b === 0)).toBe(true);
+  });
+
+  it("does not persist a refused key, and a failing persist still wipes", async () => {
+    const refused = seed("granted key").slice();
+    const persist = vi.fn(async () => {});
+    const { asSdk: refusing } = stubSdk({
+      identities: {
+        [OWNER]: [grantKey(seed("granted key"), { disabledAt: 5n })],
+      },
+    });
+    await expect(
+      loginWithWalletAnswer(
+        refusing,
+        { identityId: OWNER, grant: testGrant(refused) },
+        { persist },
+      ),
+    ).rejects.toBeInstanceOf(WalletAnswerRefusedError);
+    expect(persist).not.toHaveBeenCalled();
+
+    const failing = seed("granted key").slice();
+    const { asSdk } = stubSdk({
+      identities: {
+        [OWNER]: [
+          grantKey(seed("granted key"), { expiresAt: BigInt(FRESH_EXPIRES) }),
+        ],
+      },
+      budgets: { 3: 55n },
+    });
+    await expect(
+      loginWithWalletAnswer(
+        asSdk,
+        { identityId: OWNER, grant: testGrant(failing) },
+        {
+          persist: async () => {
+            throw new Error("storage blocked");
+          },
+        },
+      ),
+    ).rejects.toThrow("storage blocked");
+    expect(loginWithPrivateKey).not.toHaveBeenCalledWith(asSdk, "cWIF", OWNER);
+    expect(failing.every((b) => b === 0)).toBe(true);
+  });
+});
+
+describe("restoreWalletLogin", () => {
+  const FRESH_EXPIRES = GRANT_EXPIRES - 86_400_000;
+  const stored = { identityId: OWNER, keyId: 3, contractId: CONTRACT_ID };
+
+  it("signs in again with a kept key that can still write", async () => {
+    const privateKey = seed("granted key").slice();
+    const { asSdk } = stubSdk({
+      identities: {
+        [OWNER]: [
+          grantKey(seed("granted key"), { expiresAt: BigInt(FRESH_EXPIRES) }),
+        ],
+      },
+      budgets: { 3: 55n },
+    });
+
+    const result = await restoreWalletLogin(asSdk, stored, privateKey);
+
+    expect(result?.renewNeeded).toBe(false);
+    expect(result?.login.identityId).toBe(OWNER);
+    expect(result?.login.grant.remainingBudget).toBe(55n);
+    expect(loginWithPrivateKey).toHaveBeenCalledWith(asSdk, "cWIF", OWNER);
+    expect(privateKey.every((b) => b === 0)).toBe(true);
+  });
+
+  it.each([
+    {
+      name: "an expiring key",
+      keys: [grantKey(seed("granted key"))],
+      budgets: { 3: 55n },
+      chainTimeMs: BigInt(GRANT_EXPIRES - 60 * 60_000),
+    },
+    {
+      name: "a spent allowance",
+      keys: [grantKey(seed("granted key"))],
+      budgets: { 3: 0n },
+    },
+  ])("restores $name but asks for a renewal", async (c) => {
+    const privateKey = seed("granted key").slice();
+    const { asSdk } = stubSdk({
+      identities: { [OWNER]: c.keys },
+      budgets: c.budgets,
+      ...(c.chainTimeMs ? { chainTimeMs: c.chainTimeMs } : {}),
+    });
+
+    const result = await restoreWalletLogin(asSdk, stored, privateKey);
+
+    expect(result?.renewNeeded).toBe(true);
+    expect(result?.login.identityId).toBe(OWNER);
+    expect(privateKey.every((b) => b === 0)).toBe(true);
+  });
+
+  it.each([
+    {
+      name: "a disabled key",
+      keys: [grantKey(seed("granted key"), { disabledAt: 5n })],
+    },
+    { name: "a key that is gone", keys: [masterKey] },
+    {
+      name: "a key bound to another contract",
+      keys: [
+        grantKey(seed("granted key"), {
+          contractBounds: {
+            contractBoundsType: "singleContract",
+            identifier: { toString: () => OTHER },
+          },
+        }),
+      ],
+    },
+  ])("forgets $name", async (c) => {
+    const privateKey = seed("granted key").slice();
+    const { asSdk } = stubSdk({
+      identities: { [OWNER]: c.keys },
+      budgets: { 3: 55n },
+    });
+
+    expect(await restoreWalletLogin(asSdk, stored, privateKey)).toBeNull();
+    expect(loginWithPrivateKey).not.toHaveBeenCalledWith(asSdk, "cWIF", OWNER);
     expect(privateKey.every((b) => b === 0)).toBe(true);
   });
 });
