@@ -292,7 +292,7 @@ describe("SettingsPanel", () => {
       );
       expect(screen.getByText("On this device")).toBeTruthy();
       expect(screen.getByTestId("wallet-session-kept").textContent).toBe(
-        "Kept until it expires",
+        "Kept on this device",
       );
       unmount();
 
@@ -317,6 +317,11 @@ describe("SettingsPanel", () => {
       expect(
         screen.getByText(
           /The wallet still holds the connection; Disconnect in DashPay to revoke the key\./,
+        ),
+      ).toBeTruthy();
+      expect(
+        screen.getByText(
+          /Removes the remembered identity, deletes any wallet key kept on this device and clears the identity's cached notes from this browser\./,
         ),
       ).toBeTruthy();
       fireEvent.click(
@@ -373,14 +378,16 @@ describe("SettingsPanel", () => {
       expect(onRenewInWallet).toHaveBeenCalledTimes(1);
     });
 
-    it("explains why the last write stopped", () => {
+    it("explains that writes stop until the key is renewed", () => {
       mockUseSession.mockReturnValue(
         makeSession({ walletGrant: grant, walletNotice: "renew" }),
       );
       render(<SettingsPanel onOpenLogin={vi.fn()} onRenewInWallet={vi.fn()} />);
-      expect(screen.getByRole("alert").textContent).toMatch(
-        /ran out of allowance or expired/,
+      const text = screen.getByRole("alert").textContent ?? "";
+      expect(text).toMatch(
+        /has run out of allowance or expired, so the network will refuse new writes until you renew the connection in DashPay\./,
       );
+      expect(text).not.toMatch(/last write/);
     });
 
     it("dismisses the renewal notice", () => {

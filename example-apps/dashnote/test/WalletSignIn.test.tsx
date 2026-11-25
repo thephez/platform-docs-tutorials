@@ -551,9 +551,23 @@ describe("WalletSignIn", () => {
 
     it("keeps a renewal on when a session is stored", async () => {
       mocks.peekWalletSession.mockResolvedValue({ identityId: IDENTITY });
+      mocks.mockUseSession.mockReturnValue(
+        makeSession({ identityId: IDENTITY }),
+      );
       renderSignIn({ renew: true, identityHint: IDENTITY });
       await screen.findByTestId("wallet-request-uri");
       await waitFor(() => expect(checkbox().checked).toBe(true));
+    });
+
+    it("ignores a session stored for another identity on renewal", async () => {
+      mocks.peekWalletSession.mockResolvedValue({ identityId: "someone-else" });
+      mocks.mockUseSession.mockReturnValue(
+        makeSession({ identityId: IDENTITY, walletSessionKept: true }),
+      );
+      renderSignIn({ renew: true, identityHint: IDENTITY });
+      await screen.findByTestId("wallet-request-uri");
+      await waitFor(() => expect(checkbox().checked).toBe(false));
+      expect(mocks.peekWalletSession).toHaveBeenCalledTimes(1);
     });
 
     it("is unavailable when the browser can't keep a key", async () => {
@@ -609,17 +623,45 @@ describe("WalletSignIn", () => {
       );
     });
 
+    it("keeps the old record when an unchecked sign-in fails", async () => {
+      mocks.loginWithWalletAnswer.mockRejectedValue(new Error("key gone"));
+      renderSignIn();
+      await screen.findByTestId("wallet-request-uri");
+      fireEvent.click(checkbox());
+      await confirmAnswer();
+      expect(await screen.findByText("key gone")).toBeTruthy();
+      expect(mocks.clearWalletSession).not.toHaveBeenCalled();
+    });
+
     it("signs in for this tab only when unchecked", async () => {
       const loginWithWallet = vi.fn().mockResolvedValue(undefined);
       mocks.mockUseSession.mockReturnValue(makeSession({ loginWithWallet }));
+      const signedIn = deferred<unknown>();
+      mocks.loginWithWalletAnswer.mockReturnValue(signedIn.promise);
       const { onSignedIn } = renderSignIn();
       await screen.findByTestId("wallet-request-uri");
       fireEvent.click(checkbox());
       expect(checkbox().checked).toBe(false);
 
       const answer = await confirmAnswer();
+      await waitFor(() =>
+        expect(mocks.loginWithWalletAnswer).toHaveBeenCalledTimes(1),
+      );
+      // The old record stays until the new key has signed in.
+      expect(mocks.clearWalletSession).not.toHaveBeenCalled();
+      await act(async () =>
+        signedIn.resolve({
+          identityId: IDENTITY,
+          auth: {},
+          grant: { keyId: 5 },
+        }),
+      );
       await waitFor(() => expect(onSignedIn).toHaveBeenCalledTimes(1));
       expect(mocks.clearWalletSession).toHaveBeenCalledTimes(1);
+      expect(mocks.clearWalletSession).toHaveBeenCalledWith();
+      expect(mocks.clearWalletSession.mock.invocationCallOrder[0]).toBeLessThan(
+        loginWithWallet.mock.invocationCallOrder[0],
+      );
       expect(mocks.loginWithWalletAnswer).toHaveBeenCalledWith(
         expect.anything(),
         answer,
@@ -660,11 +702,55 @@ describe("WalletSignIn", () => {
       expect(log).toHaveBeenCalledWith(
         "Couldn't keep the key on this device; you'll sign in again after a reload.",
       );
+      // An older key kept for this identity must not outlive the new one.
+      expect(mocks.clearWalletSession).toHaveBeenCalledTimes(1);
+      expect(mocks.clearWalletSession).toHaveBeenCalledWith();
       expect(loginWithWallet).toHaveBeenCalledWith(expect.anything(), {
         rememberMe: true,
         staySignedIn: false,
       });
     });
+  });
+
+  it("removes only the key it kept when closed during the sign-in", async () => {
+    const finished = deferred<unknown>();
+    mocks.loginWithWalletAnswer.mockImplementation(
+      async (_sdk, _answer, options) => {
+        await options.persist(
+          {
+            keyId: 7,
+            contractId: "contract-abc",
+            totalBudget: null,
+            remainingBudget: null,
+            expiresAt: null,
+          },
+          new Uint8Array(32),
+        );
+        await finished.promise;
+        return { identityId: IDENTITY, auth: {}, grant: { keyId: 7 } };
+      },
+    );
+    const loginWithWallet = vi.fn().mockResolvedValue(undefined);
+    mocks.mockUseSession.mockReturnValue(makeSession({ loginWithWallet }));
+    const { unmount } = renderSignIn({ identityHint: IDENTITY });
+    await screen.findByTestId("wallet-request-uri");
+    await act(async () =>
+      answers[0].resolve({ identityId: IDENTITY, grant: {} }),
+    );
+    await waitFor(() =>
+      expect(mocks.saveWalletSession).toHaveBeenCalledTimes(1),
+    );
+    unmount();
+    await act(async () => finished.resolve(undefined));
+
+    await waitFor(() =>
+      expect(mocks.clearWalletSession).toHaveBeenCalledTimes(1),
+    );
+    expect(mocks.clearWalletSession).toHaveBeenCalledWith({
+      identityId: IDENTITY,
+      keyId: 7,
+    });
+    expect(loginWithWallet).not.toHaveBeenCalled();
   });
 
   it("aborts the poll when it unmounts", async () => {

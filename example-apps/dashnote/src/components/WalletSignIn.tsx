@@ -83,7 +83,8 @@ export function WalletSignIn({
   const [attempt, setAttempt] = useState(0);
   const [replacedCode, setReplacedCode] = useState(false);
   const [copied, setCopied] = useState(false);
-  // A renewal keeps whether this device already holds the session.
+  // A renewal keeps whether this device already holds this identity's
+  // session.
   const [staySignedIn, setStaySignedIn] = useState(
     renew ? session.walletSessionKept : true,
   );
@@ -114,10 +115,13 @@ export function WalletSignIn({
         if (alive) setStorageAvailable(available);
       });
     if (renew) {
+      const current = sessionRef.current.identityId;
       peekWalletSession()
         .catch(() => null)
         .then((stored) => {
-          if (alive && !stayTouchedRef.current) setStaySignedIn(!!stored);
+          if (alive && !stayTouchedRef.current) {
+            setStaySignedIn(stored !== null && stored.identityId === current);
+          }
         });
     }
     return () => {
@@ -154,26 +158,32 @@ export function WalletSignIn({
     const staySignedIn = propsRef.current.keepKey;
     const { identityId } = answer;
     let kept = staySignedIn;
+    let saved: { identityId: string; keyId: number } | null = null;
     try {
-      if (!staySignedIn) void clearWalletSession().catch(() => {});
       const persist = staySignedIn
-        ? (grant: WalletGrant, privateKey: Uint8Array) =>
-            saveWalletSession(
-              {
-                identityId,
-                keyId: grant.keyId,
-                contractId: grant.contractId,
-                totalBudget: grant.totalBudget,
-                expiresAt: grant.expiresAt,
-                grantedAt: Date.now(),
-              },
-              privateKey,
-            ).catch(() => {
+        ? async (grant: WalletGrant, privateKey: Uint8Array) => {
+            try {
+              await saveWalletSession(
+                {
+                  identityId,
+                  keyId: grant.keyId,
+                  contractId: grant.contractId,
+                  totalBudget: grant.totalBudget,
+                  expiresAt: grant.expiresAt,
+                  grantedAt: Date.now(),
+                },
+                privateKey,
+              );
+              saved = { identityId, keyId: grant.keyId };
+            } catch {
+              kept = false;
+              // An older key kept here would otherwise sign the next load in.
+              void clearWalletSession().catch(() => {});
               sessionRef.current.log(
                 "Couldn't keep the key on this device; you'll sign in again after a reload.",
               );
-              kept = false;
-            })
+            }
+          }
         : undefined;
       const login = await mod.loginWithWalletAnswer(
         connected,
@@ -182,9 +192,10 @@ export function WalletSignIn({
       );
       if (!aliveRef.current) {
         // Closed before the session took the key; don't leave it behind.
-        if (kept) void clearWalletSession().catch(() => {});
+        if (saved) void clearWalletSession(saved).catch(() => {});
         return;
       }
+      if (!staySignedIn) void clearWalletSession().catch(() => {});
       await sessionRef.current.loginWithWallet(login, {
         rememberMe: staySignedIn,
         staySignedIn: kept,

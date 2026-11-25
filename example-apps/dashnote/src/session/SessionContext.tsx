@@ -79,8 +79,11 @@ function loadAppConnect(): Promise<AppConnectModule> {
 // timeout per attempt, which stalls the wallet sign-in's polling.
 const CONNECTION_OPTIONS = { settings: { connectTimeoutMs: 5_000 } };
 
-function forgetStoredWalletSession() {
-  void clearWalletSession().catch(() => {});
+function forgetStoredWalletSession(match?: {
+  identityId: string;
+  keyId: number;
+}) {
+  void clearWalletSession(match).catch(() => {});
 }
 
 export type SessionStatus =
@@ -155,6 +158,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [contractId, setContractIdState] = useState<string | null>(() =>
     loadStoredContractId(),
   );
+  // The restore runs in a mount effect and must see a later switch.
+  const contractIdRef = useRef(contractId);
   const [rememberedIdentityId, setRememberedIdentityId] = useState<
     string | null
   >(initialRemembered?.id ?? null);
@@ -254,12 +259,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       connected: DashSdk,
       resolvedKeyManager: DashKeyManager,
       detail: string,
-      { rememberMe, grant }: { rememberMe: boolean; grant: WalletGrant | null },
+      {
+        rememberMe,
+        grant,
+        kept = false,
+        notice = null,
+      }: {
+        rememberMe: boolean;
+        grant: WalletGrant | null;
+        kept?: boolean;
+        notice?: WalletNotice | null;
+      },
     ) => {
+      // A logout, forget or newer sign-in during the DPNS lookup below
+      // bumps the epoch; the rest of this sign-in then stops.
+      const epoch = sessionEpochRef.current;
       setKeyManager(resolvedKeyManager);
       const resolvedId = resolvedKeyManager.identityId ?? null;
       applyWalletGrant(grant, resolvedId);
-      setWalletNotice(null);
+      setWalletNotice(notice);
+      setWalletSessionKept(kept);
+      // A pasted key replaces any wallet session kept on this device.
+      if (!grant) forgetStoredWalletSession();
       setIdentityId(resolvedId ?? null);
       setStatus("authenticated");
       log(`Identity resolved: ${resolvedId ?? "(unknown)"}`, {
@@ -278,6 +299,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         } catch (dpnsErr) {
           log(`DPNS lookup failed: ${errorMessage(dpnsErr)}`, "info");
         }
+        if (sessionEpochRef.current !== epoch) return;
         setDpnsName(resolvedName);
       }
       if (rememberMe && resolvedId) {
@@ -298,7 +320,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       resolve: (
         connected: DashSdk,
       ) => Promise<{ keyManager: DashKeyManager; detail: string }>,
-      options: { rememberMe: boolean; grant: WalletGrant | null },
+      options: {
+        rememberMe: boolean;
+        grant: WalletGrant | null;
+        kept?: boolean;
+      },
     ) => {
       // Snapshot session state so a failed login can restore the user's
       // prior context instead of clobbering it. Without this, mistyping a
@@ -419,8 +445,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         },
         { rememberMe, grant: null },
       );
-      setWalletSessionKept(false);
-      forgetStoredWalletSession();
     },
     [authenticate],
   );
@@ -439,9 +463,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         {
           rememberMe: (options.rememberMe ?? false) || staySignedIn,
           grant: walletLogin.grant,
+          kept: staySignedIn,
         },
       );
-      setWalletSessionKept(staySignedIn);
     },
     [authenticate],
   );
@@ -559,8 +583,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const current = () => sessionEpochRef.current === epoch;
 
     async function restore(stored: StoredWalletSession) {
-      let connected: DashSdk;
+      let connected: DashSdk | null = null;
       let privateKey: Uint8Array | null = null;
+      // Browses whoever is remembered now, which another tab may have changed.
+      const browseRemembered = () => {
+        const remembered = loadRememberedIdentity();
+        setKeyManager(null);
+        setIdentityId(remembered?.id ?? null);
+        setRememberedIdentityId(remembered?.id ?? null);
+        setDpnsName(remembered?.name ?? null);
+        setStatus(remembered ? "browsing" : connected ? "readonly" : "idle");
+      };
       try {
         connected = await connect();
         if (!current()) return;
@@ -569,11 +602,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           loaded?.privateKey.fill(0);
           return;
         }
+        // A null load means the store already dropped a record that would
+        // not open; a record for someone else is another tab's to keep.
         if (!loaded || loaded.session.identityId !== stored.identityId) {
           loaded?.privateKey.fill(0);
-          forgetStoredWalletSession();
-          log("Your wallet key is no longer valid. Sign in again.");
-          setStatus("browsing");
+          if (!loaded) {
+            log("Your wallet key is no longer valid. Sign in again.");
+          }
+          browseRemembered();
           return;
         }
         privateKey = loaded.privateKey;
@@ -589,33 +625,45 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         const restored = await restoreWalletLogin(connected, key, handed);
         if (!current()) return;
         if (!restored) {
-          forgetStoredWalletSession();
+          forgetStoredWalletSession({
+            identityId: key.identityId,
+            keyId: key.keyId,
+          });
           log("Your wallet key is no longer valid. Sign in again.");
-          setStatus("browsing");
+          browseRemembered();
           return;
         }
-        if (loadStoredContractId() !== key.contractId) {
-          forgetStoredWalletSession();
+        // Another tab may have signed in as someone else, forgotten the
+        // identity or switched contract during the chain read. The store is
+        // then theirs to manage; this tab just doesn't sign in.
+        if (loadRememberedIdentity()?.id !== key.identityId) {
+          browseRemembered();
+          return;
+        }
+        if (contractIdRef.current !== key.contractId) {
           log(
             "Your wallet key is bound to the previous contract. Sign in again to use this one.",
           );
-          setStatus("browsing");
+          browseRemembered();
           return;
         }
         await enterAuthenticated(
           connected,
           keyManagerFromKey(restored.login.identityId, restored.login.auth),
           "restoreWalletLogin",
-          { rememberMe: true, grant: restored.login.grant },
+          {
+            rememberMe: true,
+            grant: restored.login.grant,
+            kept: true,
+            notice: restored.renewNeeded ? "renew" : null,
+          },
         );
-        setWalletSessionKept(true);
-        if (restored.renewNeeded) setWalletNotice("renew");
       } catch (err) {
         privateKey?.fill(0);
         if (!current()) return;
         // Kept for the next load: a network failure says nothing about the key.
         log(`Couldn't restore the wallet session: ${errorMessage(err)}`);
-        setStatus("browsing");
+        browseRemembered();
       }
     }
 
@@ -627,12 +675,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         stored = null;
       }
       const remembered = loadRememberedIdentity();
-      const contract = loadStoredContractId();
       if (
         stored &&
-        (stored.identityId !== remembered?.id || stored.contractId !== contract)
+        (stored.identityId !== remembered?.id ||
+          stored.contractId !== contractIdRef.current)
       ) {
-        forgetStoredWalletSession();
+        forgetStoredWalletSession({
+          identityId: stored.identityId,
+          keyId: stored.keyId,
+        });
         stored = null;
       }
       try {
@@ -662,6 +713,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         nextId = loadStoredContractId();
       }
       setContractIdState(nextId);
+      contractIdRef.current = nextId;
       // A wallet key can only write to the contract it was issued for. The
       // ref, not the closure: a registration started under a mnemonic may
       // finish after a wallet sign-in and call an older setContractId.

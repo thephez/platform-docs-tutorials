@@ -181,9 +181,9 @@ export function SettingsPanel({
         <Section title="Wallet connection">
           {session.walletNotice === "renew" && (
             <OperationResultNotice tone="error" title="Renew needed">
-              This browser&apos;s key ran out of allowance or expired, so the
-              last write didn&apos;t go through. Renew the connection in DashPay
-              to keep writing.
+              This browser&apos;s key has run out of allowance or expired, so
+              the network will refuse new writes until you renew the connection
+              in DashPay.
               <button
                 type="button"
                 onClick={session.dismissWalletNotice}
@@ -224,7 +224,7 @@ export function SettingsPanel({
               className="text-right text-ink-2"
             >
               {session.walletSessionKept
-                ? "Kept until it expires"
+                ? "Kept on this device"
                 : "This tab only"}
             </dd>
           </dl>
@@ -349,8 +349,9 @@ export function SettingsPanel({
               Forget this device
             </button>
             <p className="text-[11px] text-ink-4">
-              Removes the remembered identity and clears its cached notes from
-              this browser.
+              Removes the remembered identity, deletes any wallet key kept on
+              this device and clears the identity&apos;s cached notes from this
+              browser.
               {session.walletGrant &&
                 " The wallet still holds the connection; Disconnect in DashPay to revoke the key."}
             </p>
