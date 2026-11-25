@@ -84,11 +84,9 @@ export function WalletSignIn({
   const [replacedCode, setReplacedCode] = useState(false);
   const [copied, setCopied] = useState(false);
   // A renewal keeps whether this device already holds this identity's
-  // session.
-  const [staySignedIn, setStaySignedIn] = useState(
-    renew ? session.walletSessionKept : true,
-  );
-  const stayTouchedRef = useRef(false);
+  // session, so the box waits for the store to say.
+  const [staySignedIn, setStaySignedIn] = useState(!renew);
+  const [keptKnown, setKeptKnown] = useState(!renew);
   const [storageAvailable, setStorageAvailable] = useState<boolean | null>(
     null,
   );
@@ -119,9 +117,9 @@ export function WalletSignIn({
       peekWalletSession()
         .catch(() => null)
         .then((stored) => {
-          if (alive && !stayTouchedRef.current) {
-            setStaySignedIn(stored !== null && stored.identityId === current);
-          }
+          if (!alive) return;
+          setStaySignedIn(stored !== null && stored.identityId === current);
+          setKeptKnown(true);
         });
     }
     return () => {
@@ -178,7 +176,10 @@ export function WalletSignIn({
             } catch {
               kept = false;
               // An older key kept here would otherwise sign the next load in.
-              void clearWalletSession().catch(() => {});
+              void clearWalletSession({
+                identityId,
+                keyId: grant.keyId,
+              }).catch(() => {});
               sessionRef.current.log(
                 "Couldn't keep the key on this device; you'll sign in again after a reload.",
               );
@@ -506,12 +507,11 @@ export function WalletSignIn({
               data-testid="wallet-stay-signed-in"
               checked={keepKey}
               disabled={
-                storageAvailable === false || phase.kind === "signing-in"
+                !keptKnown ||
+                storageAvailable === false ||
+                phase.kind === "signing-in"
               }
-              onChange={(event) => {
-                stayTouchedRef.current = true;
-                setStaySignedIn(event.target.checked);
-              }}
+              onChange={(event) => setStaySignedIn(event.target.checked)}
               className="mt-0.5 h-3.5 w-3.5 accent-[color:var(--color-accent)]"
             />
             <span>Stay signed in on this device</span>

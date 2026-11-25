@@ -559,6 +559,24 @@ describe("WalletSignIn", () => {
       await waitFor(() => expect(checkbox().checked).toBe(true));
     });
 
+    it("holds a renewal's box until the store answers", async () => {
+      const peek = deferred<unknown>();
+      mocks.peekWalletSession.mockReturnValue(peek.promise);
+      mocks.mockUseSession.mockReturnValue(
+        makeSession({ identityId: IDENTITY, walletSessionKept: true }),
+      );
+      renderSignIn({ renew: true, identityHint: IDENTITY });
+      await screen.findByTestId("wallet-request-uri");
+      expect(checkbox().disabled).toBe(true);
+      expect(checkbox().checked).toBe(false);
+
+      await act(async () => peek.resolve({ identityId: IDENTITY }));
+      expect(checkbox().disabled).toBe(false);
+      expect(checkbox().checked).toBe(true);
+      fireEvent.click(checkbox());
+      expect(checkbox().checked).toBe(false);
+    });
+
     it("ignores a session stored for another identity on renewal", async () => {
       mocks.peekWalletSession.mockResolvedValue({ identityId: "someone-else" });
       mocks.mockUseSession.mockReturnValue(
@@ -702,9 +720,12 @@ describe("WalletSignIn", () => {
       expect(log).toHaveBeenCalledWith(
         "Couldn't keep the key on this device; you'll sign in again after a reload.",
       );
-      // An older key kept for this identity must not outlive the new one.
+      // Only the key it tried to keep; another tab's session stays.
       expect(mocks.clearWalletSession).toHaveBeenCalledTimes(1);
-      expect(mocks.clearWalletSession).toHaveBeenCalledWith();
+      expect(mocks.clearWalletSession).toHaveBeenCalledWith({
+        identityId: IDENTITY,
+        keyId: 5,
+      });
       expect(loginWithWallet).toHaveBeenCalledWith(expect.anything(), {
         rememberMe: true,
         staySignedIn: false,

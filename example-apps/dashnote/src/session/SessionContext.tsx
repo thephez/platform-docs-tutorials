@@ -264,16 +264,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         grant,
         kept = false,
         notice = null,
+        restoring = false,
       }: {
         rememberMe: boolean;
         grant: WalletGrant | null;
         kept?: boolean;
         notice?: WalletNotice | null;
+        restoring?: boolean;
       },
     ) => {
       // A logout, forget or newer sign-in during the DPNS lookup below
       // bumps the epoch; the rest of this sign-in then stops.
       const epoch = sessionEpochRef.current;
+      const rememberedBefore = loadRememberedIdentity()?.id ?? null;
       setKeyManager(resolvedKeyManager);
       const resolvedId = resolvedKeyManager.identityId ?? null;
       applyWalletGrant(grant, resolvedId);
@@ -303,6 +306,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setDpnsName(resolvedName);
       }
       if (rememberMe && resolvedId) {
+        // Another tab may have remembered someone else, or forgotten the
+        // identity a restore relied on, during the lookup; theirs stands.
+        const rememberedNow = loadRememberedIdentity()?.id ?? null;
+        const changedElsewhere =
+          rememberedNow !== rememberedBefore && rememberedNow !== resolvedId;
+        if (changedElsewhere && (rememberedNow !== null || restoring)) return;
         saveRememberedIdentity({ id: resolvedId, name: resolvedName });
         setRememberedIdentityId(resolvedId);
       } else {
@@ -633,14 +642,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           browseRemembered();
           return;
         }
-        // Another tab may have signed in as someone else, forgotten the
-        // identity or switched contract during the chain read. The store is
-        // then theirs to manage; this tab just doesn't sign in.
-        if (loadRememberedIdentity()?.id !== key.identityId) {
+        const latest = await peekWalletSession();
+        if (!current()) return;
+        // Another tab may have signed in as someone else, logged out,
+        // forgotten the identity or switched contract during the chain read.
+        // The store is then theirs to manage; this tab just doesn't sign in.
+        if (
+          loadRememberedIdentity()?.id !== key.identityId ||
+          latest?.identityId !== key.identityId ||
+          latest.keyId !== key.keyId
+        ) {
           browseRemembered();
           return;
         }
-        if (contractIdRef.current !== key.contractId) {
+        if (
+          contractIdRef.current !== key.contractId ||
+          loadStoredContractId() !== key.contractId
+        ) {
           log(
             "Your wallet key is bound to the previous contract. Sign in again to use this one.",
           );
@@ -656,6 +674,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             grant: restored.login.grant,
             kept: true,
             notice: restored.renewNeeded ? "renew" : null,
+            restoring: true,
           },
         );
       } catch (err) {
@@ -678,12 +697,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (
         stored &&
         (stored.identityId !== remembered?.id ||
-          stored.contractId !== contractIdRef.current)
+          stored.contractId !== loadStoredContractId())
       ) {
         forgetStoredWalletSession({
           identityId: stored.identityId,
           keyId: stored.keyId,
         });
+        stored = null;
+      }
+      // Matches the shared contract, so this tab is the stale one.
+      if (stored && stored.contractId !== contractIdRef.current) {
         stored = null;
       }
       try {
