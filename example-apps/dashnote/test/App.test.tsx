@@ -65,7 +65,26 @@ vi.mock("../src/components/AppShell", () => ({
 }));
 
 vi.mock("../src/components/LoginModal", () => ({
-  LoginModal: ({ open }: { open: boolean }) => <div>login:{String(open)}</div>,
+  LoginModal: ({
+    open,
+    onClose,
+    initialView,
+    renew,
+  }: {
+    open: boolean;
+    onClose: () => void;
+    initialView?: string;
+    renew?: boolean;
+  }) => (
+    <div>
+      <span>login:{String(open)}</span>
+      <button type="button" onClick={onClose}>
+        Close login
+      </button>
+      <span>view:{String(initialView)}</span>
+      <span>renew:{String(Boolean(renew))}</span>
+    </div>
+  ),
 }));
 
 vi.mock("../src/components/ActivityPanel", () => ({
@@ -102,6 +121,7 @@ function makeSession(overrides: Record<string, unknown> = {}) {
     contractId: null,
     rememberedIdentityId: null,
     dpnsName: null,
+    restoringWallet: false,
     enterReadOnly: vi.fn().mockResolvedValue(undefined),
     viewAsRemembered: vi.fn().mockResolvedValue(undefined),
     ...overrides,
@@ -143,6 +163,28 @@ describe("App", () => {
       expect(session.viewAsRemembered).toHaveBeenCalled();
     });
     expect(session.enterReadOnly).not.toHaveBeenCalled();
+  });
+
+  it("waits for a kept wallet session to restore before browsing", async () => {
+    const session = makeSession({
+      status: "browsing",
+      sdk: null,
+      rememberedIdentityId: "remembered-identity-id",
+      restoringWallet: true,
+    });
+    mockUseSession.mockReturnValue(session);
+
+    const { rerender } = render(<App />);
+    await Promise.resolve();
+    expect(session.viewAsRemembered).not.toHaveBeenCalled();
+    expect(session.enterReadOnly).not.toHaveBeenCalled();
+
+    const restored = { ...session, restoringWallet: false };
+    mockUseSession.mockReturnValue(restored);
+    rerender(<App />);
+    await waitFor(() => {
+      expect(restored.viewAsRemembered).toHaveBeenCalled();
+    });
   });
 
   it("does not re-trigger viewAsRemembered once the SDK is initialized", async () => {
@@ -218,5 +260,143 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: /settings tab/i }));
     expect(screen.getByTestId("settings-identity-block")).toBeTruthy();
     expect(screen.getByText("id-app-settings")).toBeTruthy();
+  });
+
+  it("opens the login modal on the form, and on DashPay to renew", () => {
+    mockUseSession.mockReturnValue(
+      makeSession({
+        status: "authenticated",
+        identityId: "id-wallet",
+        contractId: "contract-wallet",
+        sdk: { documents: {} },
+        walletGrant: {
+          keyId: 3,
+          contractId: "contract-wallet",
+          totalBudget: null,
+          remainingBudget: null,
+          expiresAt: null,
+        },
+        walletNotice: null,
+        refreshWalletGrant: vi.fn(),
+      }),
+    );
+
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /settings tab/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Renew in DashPay" }));
+    expect(screen.getByText("login:true")).toBeTruthy();
+    expect(screen.getByText("view:wallet")).toBeTruthy();
+    expect(screen.getByText("renew:true")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    expect(screen.getByText("view:form")).toBeTruthy();
+    expect(screen.getByText("renew:false")).toBeTruthy();
+  });
+
+  describe("a login modal opened while a kept wallet session restores", () => {
+    const restoring = {
+      status: "connecting",
+      identityId: "id-restoring",
+      rememberedIdentityId: "id-restoring",
+      dpnsName: "alice",
+      restoringWallet: true,
+    };
+
+    it("closes when the restore signs in", () => {
+      mockUseSession.mockReturnValue(makeSession(restoring));
+      const { rerender } = render(<App />);
+      fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+      expect(screen.getByText("login:true")).toBeTruthy();
+
+      mockUseSession.mockReturnValue(
+        makeSession({
+          ...restoring,
+          status: "authenticated",
+          sdk: { documents: {} },
+        }),
+      );
+      rerender(<App />);
+      expect(screen.getByText("login:true")).toBeTruthy();
+
+      mockUseSession.mockReturnValue(
+        makeSession({
+          ...restoring,
+          status: "authenticated",
+          sdk: { documents: {} },
+          restoringWallet: false,
+        }),
+      );
+      rerender(<App />);
+      expect(screen.getByText("login:false")).toBeTruthy();
+    });
+
+    it("stays open when the restore falls back to browsing", () => {
+      mockUseSession.mockReturnValue(makeSession(restoring));
+      const { rerender } = render(<App />);
+      fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+
+      mockUseSession.mockReturnValue(
+        makeSession({
+          ...restoring,
+          status: "browsing",
+          sdk: {},
+          restoringWallet: false,
+        }),
+      );
+      rerender(<App />);
+      expect(screen.getByText("login:true")).toBeTruthy();
+
+      // The restore is over: a later sign-in from this modal is the
+      // user's own and the modal handles its own close.
+      mockUseSession.mockReturnValue(
+        makeSession({
+          ...restoring,
+          status: "authenticated",
+          sdk: { documents: {} },
+          restoringWallet: false,
+        }),
+      );
+      rerender(<App />);
+      expect(screen.getByText("login:true")).toBeTruthy();
+    });
+
+    it("forgets the restore once the modal is closed and reopened", () => {
+      mockUseSession.mockReturnValue(makeSession(restoring));
+      const { rerender } = render(<App />);
+      fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+      fireEvent.click(screen.getByRole("button", { name: /close login/i }));
+      expect(screen.getByText("login:false")).toBeTruthy();
+
+      mockUseSession.mockReturnValue(
+        makeSession({
+          ...restoring,
+          status: "authenticated",
+          sdk: { documents: {} },
+          restoringWallet: false,
+        }),
+      );
+      rerender(<App />);
+      fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+      expect(screen.getByText("login:true")).toBeTruthy();
+    });
+  });
+
+  it("keeps a Switch identity modal open while the session changes", () => {
+    const signedIn = {
+      status: "authenticated",
+      identityId: "id-signed-in",
+      contractId: "contract-signed-in",
+      sdk: { documents: {} },
+    };
+    mockUseSession.mockReturnValue(makeSession(signedIn));
+    const { rerender } = render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /open settings/i }));
+    expect(screen.getByText("login:true")).toBeTruthy();
+
+    mockUseSession.mockReturnValue(
+      makeSession({ ...signedIn, identityId: "id-other" }),
+    );
+    rerender(<App />);
+    expect(screen.getByText("login:true")).toBeTruthy();
   });
 });

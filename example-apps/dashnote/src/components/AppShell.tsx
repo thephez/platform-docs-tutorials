@@ -13,6 +13,7 @@ interface AppShellProps {
   identityId: string | null;
   dpnsName: string | null;
   contractId: string | null;
+  restoringWallet?: boolean;
   onLoginOpen: () => void;
   onOpenActivity?: () => void;
   children: ReactNode;
@@ -97,6 +98,7 @@ export function AppShell({
   identityId,
   dpnsName,
   contractId,
+  restoringWallet = false,
   onLoginOpen,
   onOpenActivity,
   children,
@@ -147,17 +149,19 @@ export function AppShell({
           />
         </div>
       )}
-      {status !== "authenticated" && status !== "browsing" && (
-        <NavButton
-          label="Sign in"
-          glyph="→"
-          active={false}
-          onClick={() => {
-            onLoginOpen();
-            closeDrawer();
-          }}
-        />
-      )}
+      {status !== "authenticated" &&
+        status !== "browsing" &&
+        !restoringWallet && (
+          <NavButton
+            label="Sign in"
+            glyph="→"
+            active={false}
+            onClick={() => {
+              onLoginOpen();
+              closeDrawer();
+            }}
+          />
+        )}
     </nav>
   );
 
@@ -233,6 +237,7 @@ export function AppShell({
             identityId={identityId}
             dpnsName={dpnsName}
             contractId={contractId}
+            restoringWallet={restoringWallet}
             onLoginClick={() => {
               onLoginOpen();
               closeDrawer();

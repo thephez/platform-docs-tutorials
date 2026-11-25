@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { useWifPreview } from "../hooks/useWifPreview";
 import { detectSecretShape } from "../lib/detectSecretShape";
@@ -6,20 +6,39 @@ import { errorMessage } from "../lib/logger";
 import { useSession } from "../session/useSession";
 import { Modal } from "./Modal";
 import { OperationResultNotice } from "./OperationResultNotice";
+import { WalletSignIn } from "./WalletSignIn";
+
+export type LoginView = "form" | "wallet";
 
 export interface LoginModalProps {
   open: boolean;
   onClose: () => void;
+  initialView?: LoginView;
+  renew?: boolean;
 }
 
-export function LoginModal({ open, onClose }: LoginModalProps) {
+export function LoginModal({
+  open,
+  onClose,
+  initialView = "form",
+  renew = false,
+}: LoginModalProps) {
   const session = useSession();
+  const [view, setView] = useState<LoginView>(initialView);
+  const [prevOpen, setPrevOpen] = useState(open);
+  const walletButtonRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef(false);
   const [secret, setSecret] = useState("");
   const [identityIndex, setIdentityIndex] = useState("0");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [rememberMe, setRememberMe] = useState(true);
+  // A renewal keeps the signed-in identity's remember-me choice.
+  const defaultRememberMe = () =>
+    !renew ||
+    (session.identityId !== null &&
+      session.rememberedIdentityId === session.identityId);
+  const [rememberMe, setRememberMe] = useState(defaultRememberMe);
   const [useDifferentIdentity, setUseDifferentIdentity] = useState(false);
   const [expectedIdentityId, setExpectedIdentityId] = useState("");
   const [ambiguousWif, setAmbiguousWif] = useState<string | null>(null);
@@ -57,6 +76,29 @@ export function LoginModal({ open, onClose }: LoginModalProps) {
     wifPreview.status === "ambiguous" ||
     (needsIdentityId && wifPreview.status !== "resolved");
 
+  // Reset the form as the modal opens. Done during render rather than in an
+  // effect so a reopened modal never mounts the previous view (and the
+  // wallet view's network work) first.
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    if (open) {
+      setView(initialView);
+      setRememberMe(defaultRememberMe());
+      setUseDifferentIdentity(false);
+      setError(null);
+      setSecret("");
+      setExpectedIdentityId("");
+      setAmbiguousWif(null);
+    }
+  }
+
+  useEffect(() => {
+    if (view === "form" && returnFocusRef.current) {
+      returnFocusRef.current = false;
+      walletButtonRef.current?.focus();
+    }
+  }, [view]);
+
   useEffect(() => {
     if (wifPreview.status === "ambiguous") {
       // The preview is asynchronous state; retain its actionable result while
@@ -65,17 +107,6 @@ export function LoginModal({ open, onClose }: LoginModalProps) {
       setAmbiguousWif(secret.trim());
     }
   }, [secret, wifPreview.status]);
-
-  useEffect(() => {
-    if (open) {
-      setRememberMe(true);
-      setUseDifferentIdentity(false);
-      setError(null);
-      setSecret("");
-      setExpectedIdentityId("");
-      setAmbiguousWif(null);
-    }
-  }, [open]);
 
   async function handleLogin(event: FormEvent) {
     event.preventDefault();
@@ -136,274 +167,338 @@ export function LoginModal({ open, onClose }: LoginModalProps) {
         </div>
       }
     >
-      <form onSubmit={handleLogin} className="flex flex-col gap-4 py-2">
-        {showRememberedPanel && session.rememberedIdentityId && (
-          <label
-            data-testid="remembered-identity-panel"
-            className="flex flex-col gap-1"
+      {view === "wallet" ? (
+        <WalletSignIn
+          identityHint={
+            renew
+              ? session.identityId
+              : showRememberedPanel
+                ? session.rememberedIdentityId
+                : null
+          }
+          renew={renew}
+          onBack={() => {
+            returnFocusRef.current = true;
+            setView("form");
+          }}
+          onSignedIn={onClose}
+        />
+      ) : (
+        <form onSubmit={handleLogin} className="flex flex-col gap-4 py-2">
+          <div
+            data-testid="dashpay-signin-card"
+            className="flex flex-col gap-3 rounded-xl border border-line bg-bg/40 px-3.5 py-3"
           >
-            <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-4">
-              Identity
-            </span>
-            <input
-              type="text"
-              readOnly
-              value={session.rememberedIdentityId}
-              aria-label="Remembered identity"
-              className="break-all rounded-md border border-line bg-bg/40 px-3 py-2 font-mono text-[12px] text-accent outline-none"
-            />
-            {session.dpnsName && (
-              <span className="text-[10px] text-ink-4">
-                ✓ {session.dpnsName}.dash
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line-2 text-accent">
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <rect x="6" y="2" width="12" height="20" rx="2.5" />
+                  <path d="M11 18h2" />
+                </svg>
               </span>
-            )}
-          </label>
-        )}
-
-        {useDifferentIdentity && session.rememberedIdentityId && (
-          <p
-            data-testid="different-identity-notice"
-            className="rounded-md border border-line bg-bg/40 px-3 py-2 text-[11px] text-ink-3"
-          >
-            Signing in with a different identity. The remembered identity stays
-            remembered until you sign in again or forget it.
-          </p>
-        )}
-
-        <label className="flex flex-col gap-1">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-4">
-            {showRememberedPanel
-              ? "Mnemonic or Private Key"
-              : "Identity Mnemonic or Private Key"}
-          </span>
-          <input
-            type="password"
-            autoComplete="off"
-            required
-            value={secret}
-            onChange={(event) => {
-              setSecret(event.target.value);
-              setExpectedIdentityId("");
-              setAmbiguousWif(null);
-            }}
-            placeholder="Mnemonic phrase or WIF private key (high/critical)"
-            className="rounded-md border border-line bg-bg px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent-dim"
-          />
-          {isWifInput && wifPreview.status !== "idle" && (
-            <div
-              data-testid="wif-preview"
-              aria-live="polite"
-              className="mt-1 min-h-[1.5em] text-[11px]"
-            >
-              {wifPreview.status === "checking" && (
-                <span className="text-ink-4">Checking…</span>
-              )}
-              {wifPreview.status === "resolved" && (
-                <span className="text-ink-3">
-                  ✓ Identity{" "}
-                  <span className="font-mono text-accent">
-                    {wifPreview.dpnsName
-                      ? `${wifPreview.dpnsName}.dash`
-                      : `${wifPreview.identityId.slice(0, 8)}…${wifPreview.identityId.slice(-4)}`}
-                  </span>
-                </span>
-              )}
-              {wifPreview.status === "ambiguous" && (
-                <span className="text-[color:var(--color-danger)]">
-                  This key is associated with multiple identities. Enter the
-                  full identity ID you intend to use.
-                </span>
-              )}
-              {wifPreview.status === "identity-mismatch" && (
-                <span className="text-[color:var(--color-danger)]">
-                  This key could not be verified as an eligible authentication
-                  key for that identity ID.
-                </span>
-              )}
-              {wifPreview.status === "wrong-purpose" && (
-                <span className="text-[color:var(--color-danger)]">
-                  Found identity{" "}
-                  <span className="font-mono">
-                    {wifPreview.dpnsName
-                      ? `${wifPreview.dpnsName}.dash`
-                      : `${wifPreview.identityId.slice(0, 8)}…${wifPreview.identityId.slice(-4)}`}
-                  </span>
-                  , but this is a{" "}
-                  {wifPreview.purposeName === "AUTHENTICATION"
-                    ? `${wifPreview.securityLevelName} authentication`
-                    : wifPreview.purposeName}{" "}
-                  key — paste a HIGH or CRITICAL authentication key instead.
-                </span>
-              )}
-              {wifPreview.status === "key-disabled" && (
-                <span className="text-[color:var(--color-danger)]">
-                  The matching key on identity{" "}
-                  <span className="font-mono">
-                    {wifPreview.dpnsName
-                      ? `${wifPreview.dpnsName}.dash`
-                      : `${wifPreview.identityId.slice(0, 8)}…${wifPreview.identityId.slice(-4)}`}
-                  </span>{" "}
-                  has been disabled.
-                </span>
-              )}
+              <div>
+                <div className="text-[13px] font-semibold text-ink">
+                  Sign in with DashPay
+                </div>
+                <div className="text-[11px] text-ink-4">
+                  Approve on your phone. Nothing to paste.
+                </div>
+              </div>
             </div>
-          )}
-        </label>
+            <button
+              ref={walletButtonRef}
+              type="button"
+              onClick={() => setView("wallet")}
+              className="min-h-11 rounded-md bg-accent px-4 py-2 text-[13px] font-semibold text-bg transition hover:bg-accent-dim"
+            >
+              Continue with DashPay
+            </button>
+          </div>
 
-        {needsIdentityId && !rememberedExpectedIdentityId && (
+          <div className="flex items-center gap-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-4">
+            <span className="h-px flex-1 bg-line" aria-hidden="true" />
+            or use a mnemonic / private key
+            <span className="h-px flex-1 bg-line" aria-hidden="true" />
+          </div>
+
+          {showRememberedPanel && session.rememberedIdentityId && (
+            <label
+              data-testid="remembered-identity-panel"
+              className="flex flex-col gap-1"
+            >
+              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-4">
+                Identity
+              </span>
+              <input
+                type="text"
+                readOnly
+                value={session.rememberedIdentityId}
+                aria-label="Remembered identity"
+                className="break-all rounded-md border border-line bg-bg/40 px-3 py-2 font-mono text-[12px] text-accent outline-none"
+              />
+              {session.dpnsName && (
+                <span className="text-[10px] text-ink-4">
+                  ✓ {session.dpnsName}.dash
+                </span>
+              )}
+            </label>
+          )}
+
+          {useDifferentIdentity && session.rememberedIdentityId && (
+            <p
+              data-testid="different-identity-notice"
+              className="rounded-md border border-line bg-bg/40 px-3 py-2 text-[11px] text-ink-3"
+            >
+              Signing in with a different identity. The remembered identity
+              stays remembered until you sign in again or forget it.
+            </p>
+          )}
+
           <label className="flex flex-col gap-1">
             <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-4">
-              Identity ID
+              {showRememberedPanel
+                ? "Mnemonic or Private Key"
+                : "Identity Mnemonic or Private Key"}
             </span>
             <input
-              type="text"
-              value={expectedIdentityId}
-              onChange={(event) => setExpectedIdentityId(event.target.value)}
-              placeholder="Full Dash Platform identity ID"
+              type="password"
               autoComplete="off"
               required
-              className="rounded-md border border-line bg-bg px-3 py-2 font-mono text-[12px] text-ink outline-none transition focus:border-accent-dim"
-            />
-            <span className="text-[11px] text-ink-4">
-              New notes will be owned by this exact identity. Dashnote does not
-              list identities associated with the key.
-            </span>
-          </label>
-        )}
-
-        <div className="flex items-center gap-1.5 text-[11px] text-ink-4">
-          <svg
-            width="11"
-            height="11"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            aria-hidden="true"
-          >
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-          </svg>
-          Stored in memory only — never sent over the network.
-        </div>
-
-        {session.rememberedIdentityId && !useDifferentIdentity && (
-          <div
-            data-testid="remembered-identity-actions"
-            className="flex flex-wrap gap-3 text-[11px]"
-          >
-            <button
-              type="button"
-              onClick={() => {
-                setUseDifferentIdentity(true);
+              value={secret}
+              onChange={(event) => {
+                setSecret(event.target.value);
                 setExpectedIdentityId("");
                 setAmbiguousWif(null);
               }}
-              className="font-medium text-accent-dim underline-offset-2 hover:text-accent hover:underline"
-            >
-              Use a different identity
-            </button>
-          </div>
-        )}
-
-        <label className="flex items-start gap-2 text-[12px] text-ink-2">
-          <input
-            type="checkbox"
-            checked={rememberMe}
-            onChange={(event) => setRememberMe(event.target.checked)}
-            className="mt-0.5 h-3.5 w-3.5 accent-[color:var(--color-accent)]"
-          />
-          <span>Remember this identity on this device</span>
-        </label>
-
-        {!isWifInput && (
-          <>
-            <button
-              type="button"
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="flex items-center gap-1 self-start text-[11px] font-medium text-ink-3 transition hover:text-ink"
-            >
-              <span
-                className={`inline-block transition-transform ${showAdvanced ? "rotate-90" : ""}`}
+              placeholder="Mnemonic phrase or WIF private key (high/critical)"
+              className="rounded-md border border-line bg-bg px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent-dim"
+            />
+            {isWifInput && wifPreview.status !== "idle" && (
+              <div
+                data-testid="wif-preview"
+                aria-live="polite"
+                className="mt-1 min-h-[1.5em] text-[11px]"
               >
-                ▶
-              </span>
-              Advanced settings
-            </button>
-
-            {showAdvanced && (
-              <div className="flex flex-col gap-4 rounded-md border border-line bg-bg/40 p-3">
-                <label className="flex flex-col gap-1">
-                  <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-4">
-                    Identity index
+                {wifPreview.status === "checking" && (
+                  <span className="text-ink-4">Checking…</span>
+                )}
+                {wifPreview.status === "resolved" && (
+                  <span className="text-ink-3">
+                    ✓ Identity{" "}
+                    <span className="font-mono text-accent">
+                      {wifPreview.dpnsName
+                        ? `${wifPreview.dpnsName}.dash`
+                        : `${wifPreview.identityId.slice(0, 8)}…${wifPreview.identityId.slice(-4)}`}
+                    </span>
                   </span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={identityIndex}
-                    onChange={(event) => setIdentityIndex(event.target.value)}
-                    className="w-24 rounded-md border border-line bg-bg px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent-dim"
-                  />
-                </label>
+                )}
+                {wifPreview.status === "ambiguous" && (
+                  <span className="text-[color:var(--color-danger)]">
+                    This key is associated with multiple identities. Enter the
+                    full identity ID you intend to use.
+                  </span>
+                )}
+                {wifPreview.status === "identity-mismatch" && (
+                  <span className="text-[color:var(--color-danger)]">
+                    This key could not be verified as an eligible authentication
+                    key for that identity ID.
+                  </span>
+                )}
+                {wifPreview.status === "wrong-purpose" && (
+                  <span className="text-[color:var(--color-danger)]">
+                    Found identity{" "}
+                    <span className="font-mono">
+                      {wifPreview.dpnsName
+                        ? `${wifPreview.dpnsName}.dash`
+                        : `${wifPreview.identityId.slice(0, 8)}…${wifPreview.identityId.slice(-4)}`}
+                    </span>
+                    , but this is a{" "}
+                    {wifPreview.purposeName === "AUTHENTICATION"
+                      ? `${wifPreview.securityLevelName} authentication`
+                      : wifPreview.purposeName}{" "}
+                    key — paste a HIGH or CRITICAL authentication key instead.
+                  </span>
+                )}
+                {wifPreview.status === "key-disabled" && (
+                  <span className="text-[color:var(--color-danger)]">
+                    The matching key on identity{" "}
+                    <span className="font-mono">
+                      {wifPreview.dpnsName
+                        ? `${wifPreview.dpnsName}.dash`
+                        : `${wifPreview.identityId.slice(0, 8)}…${wifPreview.identityId.slice(-4)}`}
+                    </span>{" "}
+                    has been disabled.
+                  </span>
+                )}
               </div>
             )}
-          </>
-        )}
+          </label>
 
-        {error && (
-          <OperationResultNotice tone="error" title="Error">
-            {error}
-          </OperationResultNotice>
-        )}
+          {needsIdentityId && !rememberedExpectedIdentityId && (
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-4">
+                Identity ID
+              </span>
+              <input
+                type="text"
+                value={expectedIdentityId}
+                onChange={(event) => setExpectedIdentityId(event.target.value)}
+                placeholder="Full Dash Platform identity ID"
+                autoComplete="off"
+                required
+                className="rounded-md border border-line bg-bg px-3 py-2 font-mono text-[12px] text-ink outline-none transition focus:border-accent-dim"
+              />
+              <span className="text-[11px] text-ink-4">
+                New notes will be owned by this exact identity. Dashnote does
+                not list identities associated with the key.
+              </span>
+            </label>
+          )}
 
-        <div className="flex gap-2 pt-1">
-          <button
-            type="submit"
-            disabled={submitting || !secret.trim() || previewBlocksLogin}
-            className="min-h-11 flex-1 rounded-md bg-accent px-4 py-2 text-[13px] font-semibold text-bg transition hover:bg-accent-dim disabled:cursor-not-allowed disabled:bg-surface-2 disabled:text-ink-4"
-          >
-            {submitting ? "Connecting…" : "Sign in"}
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="min-h-11 rounded-md border border-line bg-transparent px-4 py-2 text-[13px] font-semibold text-ink-3 transition hover:border-line-2 hover:text-ink-2"
-          >
-            Cancel
-          </button>
-        </div>
-
-        {!showRememberedPanel && (
-          <div className="flex items-start gap-2.5 rounded-xl border border-dashed border-line-2 px-3.5 py-3 text-[12px] text-ink-3">
+          <div className="flex items-center gap-1.5 text-[11px] text-ink-4">
             <svg
-              width="14"
-              height="14"
+              width="11"
+              height="11"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="1.6"
-              className="mt-px text-accent"
+              strokeWidth="2"
               aria-hidden="true"
             >
-              <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2 2M16.4 16.4l2 2M5.6 18.4l2-2M16.4 7.6l2-2" />
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
             </svg>
-            <div>
-              Don&apos;t have a testnet identity?{" "}
-              <a
-                href="https://bridge.thepasta.org/"
-                target="_blank"
-                rel="noreferrer"
-                className="font-semibold text-accent underline-offset-2 hover:underline max-md:mt-2 max-md:inline-flex max-md:min-h-10 max-md:items-center max-md:rounded-full max-md:border max-md:border-line-2 max-md:px-3 max-md:no-underline"
-              >
-                Create one on Dash Bridge →
-              </a>
-              <br />
-              <span className="text-ink-4">
-                Funded automatically. ~30 seconds.
-              </span>
-            </div>
+            Stored in memory only — never sent over the network.
           </div>
-        )}
-      </form>
+
+          {session.rememberedIdentityId && !useDifferentIdentity && (
+            <div
+              data-testid="remembered-identity-actions"
+              className="flex flex-wrap gap-3 text-[11px]"
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setUseDifferentIdentity(true);
+                  setExpectedIdentityId("");
+                  setAmbiguousWif(null);
+                }}
+                className="font-medium text-accent-dim underline-offset-2 hover:text-accent hover:underline"
+              >
+                Use a different identity
+              </button>
+            </div>
+          )}
+
+          <label className="flex items-start gap-2 text-[12px] text-ink-2">
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(event) => setRememberMe(event.target.checked)}
+              className="mt-0.5 h-3.5 w-3.5 accent-[color:var(--color-accent)]"
+            />
+            <span>Remember this identity on this device</span>
+          </label>
+
+          {!isWifInput && (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowAdvanced(!showAdvanced)}
+                className="flex items-center gap-1 self-start text-[11px] font-medium text-ink-3 transition hover:text-ink"
+              >
+                <span
+                  className={`inline-block transition-transform ${showAdvanced ? "rotate-90" : ""}`}
+                >
+                  ▶
+                </span>
+                Advanced settings
+              </button>
+
+              {showAdvanced && (
+                <div className="flex flex-col gap-4 rounded-md border border-line bg-bg/40 p-3">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-4">
+                      Identity index
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={identityIndex}
+                      onChange={(event) => setIdentityIndex(event.target.value)}
+                      className="w-24 rounded-md border border-line bg-bg px-3 py-2 text-[13px] text-ink outline-none transition focus:border-accent-dim"
+                    />
+                  </label>
+                </div>
+              )}
+            </>
+          )}
+
+          {error && (
+            <OperationResultNotice tone="error" title="Error">
+              {error}
+            </OperationResultNotice>
+          )}
+
+          <div className="flex gap-2 pt-1">
+            <button
+              type="submit"
+              disabled={submitting || !secret.trim() || previewBlocksLogin}
+              className="min-h-11 flex-1 rounded-md bg-accent px-4 py-2 text-[13px] font-semibold text-bg transition hover:bg-accent-dim disabled:cursor-not-allowed disabled:bg-surface-2 disabled:text-ink-4"
+            >
+              {submitting ? "Connecting…" : "Sign in"}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="min-h-11 rounded-md border border-line bg-transparent px-4 py-2 text-[13px] font-semibold text-ink-3 transition hover:border-line-2 hover:text-ink-2"
+            >
+              Cancel
+            </button>
+          </div>
+
+          {!showRememberedPanel && (
+            <div className="flex items-start gap-2.5 rounded-xl border border-dashed border-line-2 px-3.5 py-3 text-[12px] text-ink-3">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                className="mt-px text-accent"
+                aria-hidden="true"
+              >
+                <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2 2M16.4 16.4l2 2M5.6 18.4l2-2M16.4 7.6l2-2" />
+              </svg>
+              <div>
+                Don&apos;t have a testnet identity?{" "}
+                <a
+                  href="https://bridge.thepasta.org/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-semibold text-accent underline-offset-2 hover:underline max-md:mt-2 max-md:inline-flex max-md:min-h-10 max-md:items-center max-md:rounded-full max-md:border max-md:border-line-2 max-md:px-3 max-md:no-underline"
+                >
+                  Create one on Dash Bridge →
+                </a>
+                <br />
+                <span className="text-ink-4">
+                  Funded automatically. ~30 seconds.
+                </span>
+              </div>
+            </div>
+          )}
+        </form>
+      )}
     </Modal>
   );
 }

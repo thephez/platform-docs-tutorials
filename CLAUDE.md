@@ -53,7 +53,7 @@ node 1-Identities-and-Names/identity-retrieve.mjs
 node --test --test-timeout=120000 test/read-only.test.mjs
 ```
 
-**Protocol version:** `createClient()` deliberately leaves the platform protocol version unset so the SDK negotiates it with the network — it starts at a conservative version and ratchets up to whatever the network reports, capped at the newest version the SDK understands. Passing the `version` option pins it and disables negotiation outright, so a hardcoded value silently goes stale at the next network upgrade. Use `sdk.version()` when you need the negotiated value.
+**Protocol version:** `createClient()` deliberately leaves the platform protocol version unset so the SDK negotiates it with the network — it starts at a conservative version and ratchets up to whatever the network reports, capped at the newest version the SDK understands. Passing the `version` option pins it and disables negotiation outright, so a hardcoded value silently goes stale at the next network upgrade. Use `sdk.version()` when you need the negotiated value. `createClient(network, options)` forwards `options` to the trusted factory as given, for request settings such as `{ settings: { connectTimeoutMs } }`; it still never adds `version`.
 
 ## Architecture
 

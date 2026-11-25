@@ -4,7 +4,7 @@ import { Toaster } from "sonner";
 import { ActivityPanel } from "./components/ActivityPanel";
 import { AppShell } from "./components/AppShell";
 import { HowItWorks } from "./components/HowItWorks";
-import { LoginModal } from "./components/LoginModal";
+import { LoginModal, type LoginView } from "./components/LoginModal";
 import { NotesToolbar } from "./components/NotesToolbar";
 import { NotesWorkspace } from "./components/NotesWorkspace";
 import { OperationResultNotice } from "./components/OperationResultNotice";
@@ -33,18 +33,32 @@ const screenCopy: Record<TopTab, { title: string; subtitle: string }> = {
 
 function App() {
   const session = useSession();
-  const { status, sdk, enterReadOnly, viewAsRemembered } = session;
+  const { status, sdk, restoringWallet, enterReadOnly, viewAsRemembered } =
+    session;
   const [tab, setTab] = useState<TopTab>("notes");
   const [loginOpen, setLoginOpen] = useState(false);
+  const [loginView, setLoginView] = useState<LoginView>("form");
+  const [loginRenew, setLoginRenew] = useState(false);
+  const [loginOpenedDuringRestore, setLoginOpenedDuringRestore] =
+    useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const isDesktop = useMediaQuery("(min-width: 768px)");
 
   const mobileFullBleed = tab === "notes";
 
+  // A modal opened while a kept session was still restoring was asking for a
+  // sign-in the restore has now done, so it steps aside. Once the restore
+  // settles the modal is the user's own again.
+  if (loginOpenedDuringRestore && !restoringWallet) {
+    setLoginOpenedDuringRestore(false);
+    if (status === "authenticated") setLoginOpen(false);
+  }
+
   useEffect(() => {
+    if (restoringWallet) return;
     if (status === "idle") void enterReadOnly();
     else if (status === "browsing" && !sdk) void viewAsRemembered();
-  }, [enterReadOnly, viewAsRemembered, status, sdk]);
+  }, [enterReadOnly, viewAsRemembered, status, sdk, restoringWallet]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -56,6 +70,25 @@ function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  const openLogin = () => {
+    setLoginView("form");
+    setLoginRenew(false);
+    setLoginOpenedDuringRestore(restoringWallet);
+    setLoginOpen(true);
+  };
+
+  const openRenew = () => {
+    setLoginView("wallet");
+    setLoginRenew(true);
+    setLoginOpenedDuringRestore(restoringWallet);
+    setLoginOpen(true);
+  };
+
+  const closeLogin = () => {
+    setLoginOpenedDuringRestore(false);
+    setLoginOpen(false);
+  };
 
   const header = useMemo(() => screenCopy[tab], [tab]);
 
@@ -69,7 +102,8 @@ function App() {
         identityId={session.identityId}
         dpnsName={session.dpnsName}
         contractId={session.contractId}
-        onLoginOpen={() => setLoginOpen(true)}
+        restoringWallet={restoringWallet}
+        onLoginOpen={openLogin}
         onOpenActivity={() => setActivityOpen(true)}
         mobileFullBleed={mobileFullBleed}
       >
@@ -106,18 +140,26 @@ function App() {
 
           {tab === "notes" && (
             <NotesWorkspace
-              onOpenLogin={() => setLoginOpen(true)}
+              onOpenLogin={openLogin}
               onOpenSettings={() => setTab("settings")}
             />
           )}
           {tab === "how-it-works" && <HowItWorks />}
           {tab === "settings" && (
-            <SettingsPanel onOpenLogin={() => setLoginOpen(true)} />
+            <SettingsPanel
+              onOpenLogin={openLogin}
+              onRenewInWallet={openRenew}
+            />
           )}
         </div>
       </AppShell>
 
-      <LoginModal open={loginOpen} onClose={() => setLoginOpen(false)} />
+      <LoginModal
+        open={loginOpen}
+        onClose={closeLogin}
+        initialView={loginView}
+        renew={loginRenew}
+      />
       <ActivityPanel
         open={activityOpen}
         onClose={() => setActivityOpen(false)}

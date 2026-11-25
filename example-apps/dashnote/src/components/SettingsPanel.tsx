@@ -2,11 +2,23 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useContractRegistration } from "../hooks/useContractRegistration";
 import { useTheme } from "../hooks/useTheme";
+import { truncateId } from "../lib/format";
 import { clearCachedNotes } from "../lib/notesCache";
 import { useSession } from "../session/useSession";
 import { OperationResultNotice } from "./OperationResultNotice";
 
 const NETWORK = "testnet" as const;
+const CREDITS_PER_DASH = 100_000_000_000;
+
+function formatDash(credits: bigint): string {
+  return (Number(credits) / CREDITS_PER_DASH).toFixed(4);
+}
+
+function allowanceText(remaining: bigint | null, total: bigint | null): string {
+  if (remaining === null && total === null) return "no limit";
+  if (total === null) return `${formatDash(remaining ?? 0n)} DASH`;
+  return `${formatDash(remaining ?? 0n)} of ${formatDash(total)} DASH`;
+}
 
 interface CopyButtonProps {
   value: string | null;
@@ -78,10 +90,15 @@ function Section({
 
 interface SettingsPanelProps {
   onOpenLogin: () => void;
+  onRenewInWallet: () => void;
 }
 
-export function SettingsPanel({ onOpenLogin }: SettingsPanelProps) {
+export function SettingsPanel({
+  onOpenLogin,
+  onRenewInWallet,
+}: SettingsPanelProps) {
   const session = useSession();
+  const [refreshingGrant, setRefreshingGrant] = useState(false);
   const {
     register,
     registering,
@@ -110,6 +127,14 @@ export function SettingsPanel({ onOpenLogin }: SettingsPanelProps) {
   const isConnected =
     session.status === "authenticated" || session.status === "browsing";
 
+  if (!isConnected && session.restoringWallet) {
+    return (
+      <div className="rounded-md border border-line bg-bg/40 p-6 text-center text-[13px] text-ink-3">
+        <p aria-live="polite">Signing in with your wallet key…</p>
+      </div>
+    );
+  }
+
   if (!isConnected) {
     return (
       <div className="flex flex-col items-center gap-4 rounded-md border border-line bg-bg/40 p-6 text-center text-[13px] text-ink-3">
@@ -132,7 +157,10 @@ export function SettingsPanel({ onOpenLogin }: SettingsPanelProps) {
     trimmedContract.length > 0 &&
     trimmedContract !== (session.contractId ?? "");
   const canRegister = Boolean(
-    session.status === "authenticated" && session.sdk && session.keyManager,
+    session.status === "authenticated" &&
+    session.sdk &&
+    session.keyManager &&
+    !session.walletGrant,
   );
 
   return (
@@ -156,6 +184,88 @@ export function SettingsPanel({ onOpenLogin }: SettingsPanelProps) {
           <span className="font-mono text-accent-dim">{NETWORK}</span>
         </div>
       </Section>
+
+      {session.walletGrant && (
+        <Section title="Wallet connection">
+          {session.walletNotice === "renew" && (
+            <OperationResultNotice tone="error" title="Renew needed">
+              This browser&apos;s key has run out of allowance or expired, so
+              the network will refuse new writes until you renew the connection
+              in DashPay.
+              <button
+                type="button"
+                onClick={session.dismissWalletNotice}
+                className="ml-2 text-[11px] font-semibold underline underline-offset-2 opacity-80 transition hover:opacity-100"
+              >
+                Dismiss
+              </button>
+            </OperationResultNotice>
+          )}
+          <dl
+            data-testid="wallet-connection"
+            className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[11px]"
+          >
+            <dt className="text-ink-3">Allowance left</dt>
+            <dd className="text-right font-mono text-ink-2">
+              {allowanceText(
+                session.walletGrant.remainingBudget,
+                session.walletGrant.totalBudget,
+              )}
+            </dd>
+            <dt className="text-ink-3">Expires</dt>
+            <dd className="text-right font-mono text-ink-2">
+              {session.walletGrant.expiresAt === null
+                ? "never"
+                : new Date(session.walletGrant.expiresAt).toLocaleDateString()}
+            </dd>
+            <dt className="text-ink-3">Key id</dt>
+            <dd className="text-right font-mono text-ink-2">
+              {session.walletGrant.keyId}
+            </dd>
+            <dt className="text-ink-3">Contract</dt>
+            <dd className="text-right font-mono text-accent-dim">
+              {truncateId(session.walletGrant.contractId)}
+            </dd>
+            <dt className="text-ink-3">On this device</dt>
+            <dd
+              data-testid="wallet-session-kept"
+              className="text-right text-ink-2"
+            >
+              {session.walletSessionKept
+                ? "Kept on this device"
+                : "This tab only"}
+            </dd>
+          </dl>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={async () => {
+                setRefreshingGrant(true);
+                try {
+                  await session.refreshWalletGrant();
+                } finally {
+                  setRefreshingGrant(false);
+                }
+              }}
+              disabled={refreshingGrant}
+              className="rounded-md border border-line-2 bg-transparent px-3 py-1.5 text-[12px] font-semibold text-ink-2 transition hover:border-accent-dim hover:text-ink disabled:cursor-not-allowed disabled:border-line disabled:text-ink-4"
+            >
+              {refreshingGrant ? "Refreshing…" : "Refresh"}
+            </button>
+            <button
+              type="button"
+              onClick={onRenewInWallet}
+              className="rounded-md bg-accent px-3 py-1.5 text-[12px] font-semibold text-bg transition hover:bg-accent-dim"
+            >
+              Renew in DashPay
+            </button>
+          </div>
+          <p className="text-[11px] text-ink-4">
+            DashPay granted this browser one key that can only write notes to
+            this contract, within the allowance above.
+          </p>
+        </Section>
+      )}
 
       <Section title="Contract">
         <div className="flex flex-col gap-2">
@@ -195,6 +305,12 @@ export function SettingsPanel({ onOpenLogin }: SettingsPanelProps) {
             Registering deploys a fresh note contract to testnet and switches
             Dashnote to it immediately.
           </p>
+          {session.walletGrant && (
+            <p className="text-[11px] text-ink-4">
+              Registering a contract needs a mnemonic or private-key sign-in; a
+              wallet key only writes notes.
+            </p>
+          )}
           {registerError && (
             <OperationResultNotice tone="error" title="Error">
               {registerError}
@@ -241,8 +357,11 @@ export function SettingsPanel({ onOpenLogin }: SettingsPanelProps) {
               Forget this device
             </button>
             <p className="text-[11px] text-ink-4">
-              Removes the remembered identity and clears its cached notes from
-              this browser.
+              Removes the remembered identity, deletes any wallet key kept on
+              this device and clears the identity&apos;s cached notes from this
+              browser.
+              {session.walletGrant &&
+                " The wallet still holds the connection; Disconnect in DashPay to revoke the key."}
             </p>
           </div>
         </Section>

@@ -115,22 +115,31 @@ export async function dip13KeyPath(network, identityIndex, keyIndex) {
  *
  * @param {string} [network='testnet']
  * @returns {Promise<EvoSDK>}
+ * @param {ConnectionOptions} [options] - Forwarded to the trusted factory, e.g.
+ *   `{ settings: { connectTimeoutMs } }`. Leave `version` out so negotiation stays on.
  */
-export async function createClient(network = 'testnet') {
-  const factories = /** @type {Record<string, () => EvoSDK>} */ ({
-    testnet: () => EvoSDK.testnetTrusted(),
-    mainnet: () => EvoSDK.mainnetTrusted(),
-    local: () => EvoSDK.localTrusted(),
-  });
+export async function createClient(network = 'testnet', options) {
+  const factoryNames =
+    /** @type {Record<string, 'testnetTrusted' | 'mainnetTrusted' | 'localTrusted'>} */ ({
+      testnet: 'testnetTrusted',
+      mainnet: 'mainnetTrusted',
+      local: 'localTrusted',
+    });
 
-  const factory = factories[network];
-  if (!factory) {
+  const factoryName = factoryNames[network];
+  if (!factoryName) {
     throw new Error(
-      `Unknown network "${network}". Use: ${Object.keys(factories).join(', ')}`,
+      `Unknown network "${network}". Use: ${Object.keys(factoryNames).join(', ')}`,
     );
   }
 
-  const sdk = /** @type {EvoSDK} */ (factory());
+  // Called without arguments when there are no options, so the SDK keeps
+  // negotiating the protocol version (see the note above); never pass
+  // `version` here.
+  const sdk =
+    options === undefined
+      ? EvoSDK[factoryName]()
+      : EvoSDK[factoryName](options);
   await sdk.connect();
   return sdk;
 }

@@ -25,6 +25,7 @@ function renderCard(props: {
   identityId: string | null;
   dpnsName: string | null;
   contractId?: string | null;
+  restoringWallet?: boolean;
   onLoginClick?: () => void;
   onOpenSettings?: () => void;
 }) {
@@ -34,6 +35,7 @@ function renderCard(props: {
       identityId={props.identityId}
       dpnsName={props.dpnsName}
       contractId={props.contractId ?? null}
+      restoringWallet={props.restoringWallet}
       onLoginClick={props.onLoginClick ?? vi.fn()}
       onOpenSettings={props.onOpenSettings ?? vi.fn()}
     />,
@@ -204,6 +206,56 @@ describe("IdentityCard", () => {
     });
     expect(screen.getByText("Signed in")).toBeTruthy();
     expect(screen.getByText("Full access")).toBeTruthy();
+  });
+
+  it("shows who is signing in, with nothing to click, while a kept wallet session restores", () => {
+    renderCard({
+      status: "connecting",
+      identityId: IDENTITY_ID,
+      dpnsName: "alice",
+      restoringWallet: true,
+    });
+    expect(screen.getByText("Signing in")).toBeTruthy();
+    expect(screen.getByText("@alice")).toBeTruthy();
+    expect(screen.getByText(TRUNCATED_ID)).toBeTruthy();
+    const caption = screen.getByTestId("identity-restoring");
+    expect(caption.textContent).toBe("Signing in with your wallet key…");
+    expect(caption.getAttribute("aria-live")).toBe("polite");
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("shows the truncated identity ID while restoring when no DPNS name is known", () => {
+    renderCard({
+      status: "connecting",
+      identityId: IDENTITY_ID,
+      dpnsName: null,
+      restoringWallet: true,
+    });
+    expect(screen.getByText(TRUNCATED_ID)).toBeTruthy();
+    expect(screen.queryByText(/^@/)).toBeNull();
+  });
+
+  it("keeps the Sign in button while connecting without a restore", () => {
+    renderCard({
+      status: "connecting",
+      identityId: IDENTITY_ID,
+      dpnsName: "alice",
+      restoringWallet: false,
+    });
+    expect(screen.getByRole("button", { name: /^sign in$/i })).toBeTruthy();
+    expect(screen.getByText("Connecting...")).toBeTruthy();
+    expect(screen.queryByTestId("identity-restoring")).toBeNull();
+  });
+
+  it("takes the signed-in form once the restore authenticates", () => {
+    renderCard({
+      status: "authenticated",
+      identityId: IDENTITY_ID,
+      dpnsName: "alice",
+      restoringWallet: true,
+    });
+    expect(screen.getByText("Signed in")).toBeTruthy();
+    expect(screen.queryByTestId("identity-restoring")).toBeNull();
   });
 
   it("calls session.logout when Log out is chosen from the menu", () => {
