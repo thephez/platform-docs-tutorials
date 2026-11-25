@@ -51,6 +51,7 @@ Dashnote implements the app side of [App Connect](https://github.com/dashpay/dip
 3. The tab polls that contract (every 2 s for a minute, then every 4 s, and at once when it regains focus), decrypts each answer, and checks the key on chain with proved reads: it must be live, HIGH, bound to exactly this contract, carry a budget and an expiry, and not be about to expire.
 4. Anyone who saw the code can answer with their own identity, so the modal asks **Is this you?** with the DPNS name and full identity id before signing in. A renewal names the signed-in identity in the request and skips that step.
 5. The key then enters the same one-key session a pasted WIF does ([`loginWithPrivateKey`](./src/dash/loginWithPrivateKey.ts) + [`keyManagerFromKey`](./src/session/keyManagerFromKey.ts)). Settings → **Wallet connection** shows the allowance left and the expiry, with **Renew in DashPay**. A write refused for the key's limits prompts a renewal; a revoked key signs the session out.
+6. **Stay signed in on this device** (on by default) keeps the key across reloads: it is wrapped with AES-GCM under a non-extractable device key and stored in IndexedDB ([`src/lib/walletSessionStore.ts`](./src/lib/walletSessionStore.ts)). On the next load the app re-reads the key on chain, signs in again without the phone, or asks for a renewal when the key can no longer write. Staying signed in also remembers the identity; a kept key is restored only for the remembered identity on the current contract; and logging out, forgetting this device, pasting a mnemonic or WIF, switching contracts, or a revoked key all forget it. That protects the key at rest, not from script on the page, which is why the key's bounds and limits matter.
 
 The wallet never sees the note contract's registration key, and the browser never sees the wallet's phrase: the session key can only sign note writes, up to its allowance, until it expires. Registering a fresh contract still needs the mnemonic or a CRITICAL key, so the paste form stays. The protocol code is vendored from [platform-auth](https://github.com/PastaPastaPasta/platform-auth) under [`src/vendor/platform-auth/`](./src/vendor/platform-auth/) (pinned in `VENDORED.json`, with its own tests and vectors); [`src/dash/appConnect.ts`](./src/dash/appConnect.ts) is the Evo SDK side.
 
@@ -100,6 +101,7 @@ Supporting files:
 - **[`src/lib/rememberedIdentity.ts`](./src/lib/rememberedIdentity.ts)** — last-logged-in identity ID plus its DPNS name (when one was resolved) for read-only browse. Never stores the mnemonic or WIF.
 - **[`src/lib/detectSecretShape.ts`](./src/lib/detectSecretShape.ts)** — cheap "mnemonic vs WIF" classifier used by `SessionContext.login` and the login modal's eager WIF preview.
 - **[`src/lib/connectionId.ts`](./src/lib/connectionId.ts)** — a random 16-byte id for this browser, sent with every App Connect request so the wallet can retire the key of its previous grant to this device. It survives logout on purpose.
+- **[`src/lib/walletSessionStore.ts`](./src/lib/walletSessionStore.ts)** — the kept wallet session: one IndexedDB record holding the grant's metadata and the key encrypted under a non-extractable device key, with the identity, key id and contract bound in as additional data. No SDK imports.
 
 WIF login treats the private key as a credential, not an identity identifier. The resolver accepts ECDSA key data encoded as either a full public key or ECDSA HASH160 value (hex or base64), while rejecting other HASH160 key types. If one key is associated with multiple identities, Dashnote does not list or guess among them: the login modal requires the full intended identity ID, fetches that identity directly, and verifies that the WIF is an enabled HIGH/CRITICAL authentication key for it. The identity ID and optional DPNS label are persisted only when **Remember this identity** is checked; private keys are never persisted.
 
@@ -132,6 +134,7 @@ The Vitest suite covers:
 - create / update / delete mutation helpers
 - WIF login (`loginWithPrivateKey`), secret-shape detection, and WIF preview hook
 - wallet sign-in: the App Connect ports, request, poll loop and grant-to-session step (`appConnect`), the sign-in panel, and the session's grant state and write-error handling, plus the vendored protocol module's own tests and vectors
+- the kept wallet session: the IndexedDB store (against a fake IndexedDB and Node's Web Crypto), the restore on load, and every exit path that forgets the key
 - DPNS name resolution
 - note-title fallback formatting
 - notes cache load/save/clear and revision-equality
@@ -140,7 +143,7 @@ The Vitest suite covers:
 
 End-to-end specs live in [`test/e2e/`](./test/e2e/) and run against real testnet via Playwright ([`playwright.config.ts`](./playwright.config.ts)). The config auto-boots Vite on port 5181 and runs every spec against both `chromium-desktop` (Desktop Chrome) and `chromium-mobile` (Pixel 7) so the responsive layout is always exercised. Auth-gated specs skip cleanly when `PLATFORM_MNEMONIC` is unset. Run with `npm run test:e2e` or `npm run test:e2e:ui`.
 
-[`wallet.spec.ts`](./test/e2e/wallet.spec.ts) drives the DashPay sign-in with a scripted wallet ([`walletResponder.ts`](./test/e2e/walletResponder.ts)) that answers the app's request from the `PLATFORM_MNEMONIC` identity exactly as the mobile wallet does: it registers a bounded, budgeted key in a master-signed identity update, publishes the encrypted answer, and disables the key again when the spec ends. It writes to testnet and spends credits, like the note round-trip specs.
+[`wallet.spec.ts`](./test/e2e/wallet.spec.ts) drives the DashPay sign-in with a scripted wallet ([`walletResponder.ts`](./test/e2e/walletResponder.ts)) that answers the app's request from the `PLATFORM_MNEMONIC` identity exactly as the mobile wallet does: it registers a bounded, budgeted key in a master-signed identity update, publishes the encrypted answer, and disables the key again when the spec ends. It also covers a reload that restores the kept session without a new approval, an unchecked box keeping nothing, and "Forget this device" dropping the kept key. It writes to testnet and spends credits, like the note round-trip specs.
 
 ## Tech stack
 
